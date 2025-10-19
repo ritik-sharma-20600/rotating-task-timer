@@ -1,0 +1,24 @@
+name: rotating_task_timer
+description: A local-first rotating task timer.
+publish_to: 'none'
+version: 0.1.0
+
+
+environment:
+sdk: ">=2.18.0 <4.0.0"
+
+
+dependencies:
+flutter:
+sdk: flutter
+cupertino_icons: ^1.0.2
+shared_preferences: ^2.1.1
+flutter_local_notifications: ^12.0.4
+uuid: ^3.0.7
+
+
+flutter:
+uses-material-design: true
+
+
+# End of pubspec.yaml
