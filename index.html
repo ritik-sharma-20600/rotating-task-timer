@@ -165,6 +165,8 @@
 
     // Audio context singleton to prevent memory leaks
     let audioContext = null;
+    let wakeLock = null;
+    
     function getAudioContext() {
       if (!audioContext) {
         try {
@@ -174,6 +176,31 @@
         }
       }
       return audioContext;
+    }
+
+    async function requestWakeLock() {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+          console.log('Wake lock acquired');
+          
+          wakeLock.addEventListener('release', function() {
+            console.log('Wake lock released');
+          });
+        } catch (err) {
+          console.error('Wake lock error:', err);
+        }
+      }
+    }
+
+    function releaseWakeLock() {
+      if (wakeLock) {
+        wakeLock.release().then(function() {
+          wakeLock = null;
+        }).catch(function(err) {
+          console.error('Wake lock release error:', err);
+        });
+      }
     }
 
     // App state
@@ -249,6 +276,9 @@
       const currentTask = incompleteTasks[state.currentTaskIndex];
       if (!currentTask) return;
       
+      // Request wake lock to keep screen active
+      requestWakeLock();
+      
       state.timerStartTime = Date.now();
       state.activeTaskId = currentTask.id;
       saveTimerState();
@@ -276,6 +306,7 @@
           if (state.tasks[taskIndex].completed >= state.tasks[taskIndex].allocated) {
             stopTimer();
             state.isTimerRunning = false;
+            releaseWakeLock();
             playCompletionSound();
             render();
           }
@@ -292,6 +323,7 @@
       }
       state.timerStartTime = null;
       state.activeTaskId = null;
+      releaseWakeLock();
       saveTimerState();
     }
 
@@ -450,13 +482,18 @@
       try {
         // Vibrate phone
         if ('vibrate' in navigator) {
-          navigator.vibrate([200, 100, 200, 100, 200]);
+          navigator.vibrate([200, 100, 200, 100, 200, 100, 200]);
         }
         
-        // Play sound
+        // Play sound at maximum volume
         const ctx = getAudioContext();
         if (ctx) {
-          function playBeep(startTime, frequency) {
+          // Resume context if suspended (iOS requirement)
+          if (ctx.state === 'suspended') {
+            ctx.resume();
+          }
+          
+          function playBeep(startTime, frequency, duration) {
             const oscillator = ctx.createOscillator();
             const gainNode = ctx.createGain();
             
@@ -466,31 +503,70 @@
             oscillator.frequency.value = frequency;
             oscillator.type = 'sine';
             
-            gainNode.gain.setValueAtTime(0.8, startTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.3);
+            // Maximum volume
+            gainNode.gain.setValueAtTime(1.0, startTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
             
             oscillator.start(startTime);
-            oscillator.stop(startTime + 0.3);
+            oscillator.stop(startTime + duration);
           }
           
           const now = ctx.currentTime;
-          playBeep(now, 600);
-          playBeep(now + 0.35, 800);
-          playBeep(now + 0.7, 1000);
+          // Longer, louder beeps
+          playBeep(now, 600, 0.4);
+          playBeep(now + 0.45, 800, 0.4);
+          playBeep(now + 0.9, 1000, 0.4);
+          playBeep(now + 1.35, 1200, 0.5);
         }
         
-        // Show notification
+        // Create persistent notification with sound
         if ('Notification' in window && Notification.permission === 'granted') {
-          const notification = new Notification('Task Complete! 🎉', {
-            body: 'Great job! Time to move on.',
+          const notificationOptions = {
+            body: 'Great job! Time to move on to the next task.',
             icon: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Crect fill="%234f46e5" width="100" height="100"/%3E%3Ctext x="50" y="70" font-size="60" text-anchor="middle" fill="white"%3E✓%3C/text%3E%3C/svg%3E',
             tag: 'task-complete',
-            requireInteraction: false
-          });
+            requireInteraction: true, // Keeps notification visible
+            silent: false, // Use system notification sound
+            vibrate: [200, 100, 200, 100, 200, 100, 200],
+            actions: [
+              {
+                action: 'view',
+                title: 'View Tasks'
+              }
+            ]
+          };
           
-          setTimeout(function() {
+          const notification = new Notification('Task Complete! 🎉', notificationOptions);
+          
+          notification.onclick = function() {
+            window.focus();
             notification.close();
-          }, 5000);
+          };
+          
+          // Don't auto-close so it persists on lock screen
+          setTimeout(function() {
+            if (document.hidden) {
+              // Keep it open if phone is locked
+              return;
+            }
+            notification.close();
+          }, 10000);
+        }
+        
+        // Setup Media Session for lock screen
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'Task Complete!',
+            artist: 'Focus Timer',
+            album: 'Productivity',
+            artwork: [
+              {
+                src: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"%3E%3Crect fill="%234f46e5" width="512" height="512"/%3E%3Ctext x="256" y="380" font-size="300" text-anchor="middle" fill="white"%3E✓%3C/text%3E%3C/svg%3E',
+                sizes: '512x512',
+                type: 'image/svg+xml'
+              }
+            ]
+          });
         }
         
       } catch (e) {
