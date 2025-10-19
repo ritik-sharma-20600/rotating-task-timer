@@ -1,7 +1,7 @@
 {
   "name": "Focus Task Timer",
   "short_name": "Focus",
-  "start_url": "./focus-timer.html",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#1f2937",
   "theme_color": "#1f2937",
