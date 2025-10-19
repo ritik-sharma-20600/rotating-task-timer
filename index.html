@@ -8,7 +8,6 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Focus Task Timer</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="manifest" id="manifest-placeholder">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * {
@@ -126,6 +125,7 @@
             state.isTimerRunning = false;
             saveTimerState();
             playCompletionSound();
+            // Don't auto-advance to next task
           } else {
             state.isTimerRunning = true;
             state.timerStartTime = now;
@@ -184,11 +184,8 @@
           
           if (state.tasks[taskIndex].completed >= state.tasks[taskIndex].allocated) {
             stopTimer();
+            state.isTimerRunning = false;
             playCompletionSound();
-            const incomplete = getIncompleteTasks();
-            if (state.currentTaskIndex >= incomplete.length) {
-              state.currentTaskIndex = 0;
-            }
             render();
           }
         }
