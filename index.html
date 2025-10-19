@@ -8,7 +8,6 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Focus Task Timer</title>
   <link rel="manifest" href="manifest.json">
-  <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * {
       margin: 0;
@@ -19,11 +18,12 @@
       margin: 0;
       padding: 0;
       background: #111827;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
       user-select: none;
       -webkit-user-select: none;
       -webkit-tap-highlight-color: transparent;
       overflow-x: hidden;
+      color: #fff;
     }
     .no-scrollbar::-webkit-scrollbar {
       display: none;
@@ -32,70 +32,188 @@
       -ms-overflow-style: none;
       scrollbar-width: none;
     }
+    /* Tailwind-like utility classes */
+    .min-h-screen { min-height: 100vh; }
+    .bg-gray-900 { background-color: #111827; }
+    .bg-gray-800 { background-color: #1f2937; }
+    .bg-gray-700 { background-color: #374151; }
+    .bg-gray-600 { background-color: #4b5563; }
+    .bg-indigo-900 { background-color: #312e81; }
+    .bg-indigo-600 { background-color: #4f46e5; }
+    .bg-indigo-500 { background-color: #6366f1; }
+    .bg-green-600 { background-color: #16a34a; }
+    .bg-red-600 { background-color: #dc2626; }
+    .bg-yellow-600 { background-color: #ca8a04; }
+    .text-white { color: #ffffff; }
+    .text-gray-400 { color: #9ca3af; }
+    .text-gray-500 { color: #6b7280; }
+    .text-indigo-300 { color: #a5b4fc; }
+    .flex { display: flex; }
+    .flex-col { flex-direction: column; }
+    .items-center { align-items: center; }
+    .justify-center { justify-content: center; }
+    .gap-1 { gap: 0.25rem; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-3 { gap: 0.75rem; }
+    .p-1\.5 { padding: 0.375rem; }
+    .p-2 { padding: 0.5rem; }
+    .p-4 { padding: 1rem; }
+    .p-8 { padding: 2rem; }
+    .p-12 { padding: 3rem; }
+    .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+    .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+    .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+    .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+    .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+    .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+    .mb-1 { margin-bottom: 0.25rem; }
+    .mb-2 { margin-bottom: 0.5rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mb-6 { margin-bottom: 1.5rem; }
+    .mb-8 { margin-bottom: 2rem; }
+    .mt-2 { margin-top: 0.5rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .rounded-2xl { border-radius: 1rem; }
+    .rounded-3xl { border-radius: 1.5rem; }
+    .rounded-full { border-radius: 9999px; }
+    .w-2 { width: 0.5rem; }
+    .w-4 { width: 1rem; }
+    .w-5 { width: 1.25rem; }
+    .w-6 { width: 1.5rem; }
+    .w-8 { width: 2rem; }
+    .w-12 { width: 3rem; }
+    .w-24 { width: 6rem; }
+    .w-full { width: 100%; }
+    .h-1\.5 { height: 0.375rem; }
+    .h-2 { height: 0.5rem; }
+    .h-4 { height: 1rem; }
+    .h-5 { height: 1.25rem; }
+    .h-6 { height: 1.5rem; }
+    .h-12 { height: 3rem; }
+    .h-24 { height: 6rem; }
+    .h-full { height: 100%; }
+    .max-w-md { max-width: 28rem; }
+    .mx-auto { margin-left: auto; margin-right: auto; }
+    .flex-1 { flex: 1; }
+    .text-sm { font-size: 0.875rem; }
+    .text-lg { font-size: 1.125rem; }
+    .text-2xl { font-size: 1.5rem; }
+    .text-3xl { font-size: 1.875rem; }
+    .text-4xl { font-size: 2.25rem; }
+    .font-medium { font-weight: 500; }
+    .font-semibold { font-weight: 600; }
+    .font-bold { font-weight: 700; }
+    .text-center { text-align: center; }
+    .inline-block { display: inline-block; }
+    .cursor-pointer { cursor: pointer; }
+    .cursor-move { cursor: move; }
+    .transition-all { transition: all 0.3s; }
+    .transition-colors { transition: color 0.15s, background-color 0.15s; }
+    .overflow-hidden { overflow: hidden; }
+    .space-y-3 > * + * { margin-top: 0.75rem; }
+    .shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+    button { border: none; cursor: pointer; outline: none; }
+    button:hover { opacity: 0.9; }
+    input { outline: none; border: 1px solid #4b5563; }
+    input:focus { border-color: #6366f1; }
+    input::placeholder { color: #6b7280; }
+    .bg-gradient-to-r { background: linear-gradient(to right, #6366f1, #a855f7); }
+    .border { border: 1px solid; }
+    .border-gray-600 { border-color: #4b5563; }
   </style>
 </head>
 <body>
   <div id="app"></div>
 
   <script>
-    // Service Worker for PWA
-    if ('serviceWorker' in navigator) {
-      const manifestJSON = {
-        name: "Focus Task Timer",
-        short_name: "Focus",
-        start_url: window.location.href,
-        display: "standalone",
-        background_color: "#1f2937",
-        theme_color: "#1f2937",
-        icons: [
-          {
-            src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect fill='%234f46e5' width='100' height='100'/%3E%3Ctext x='50' y='70' font-size='60' text-anchor='middle' fill='white' font-family='sans-serif'%3E⏱%3C/text%3E%3C/svg%3E",
-            sizes: "512x512",
-            type: "image/svg+xml"
-          }
-        ]
-      };
-      
-      const stringManifest = JSON.stringify(manifestJSON);
-      const blob = new Blob([stringManifest], {type: 'application/json'});
-      const manifestURL = URL.createObjectURL(blob);
-      document.querySelector('#manifest-placeholder').setAttribute('href', manifestURL);
-    }
+    'use strict';
 
-    // Storage utilities
+    // Storage utilities with error handling
     const storage = {
       save: function(key, data) {
         try {
           localStorage.setItem(key, JSON.stringify(data));
+          return true;
         } catch (e) {
           console.error('Storage save failed:', e);
+          if (e.name === 'QuotaExceededError') {
+            alert('Storage quota exceeded. Please clear some data.');
+          }
+          return false;
         }
       },
       load: function(key, defaultValue) {
         try {
           const item = localStorage.getItem(key);
-          return item ? JSON.parse(item) : defaultValue;
+          if (!item) return defaultValue;
+          const parsed = JSON.parse(item);
+          return parsed;
         } catch (e) {
           console.error('Storage load failed:', e);
           return defaultValue;
         }
+      },
+      remove: function(key) {
+        try {
+          localStorage.removeItem(key);
+        } catch (e) {
+          console.error('Storage remove failed:', e);
+        }
       }
     };
 
+    // Audio context singleton to prevent memory leaks
+    let audioContext = null;
+    function getAudioContext() {
+      if (!audioContext) {
+        try {
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {
+          console.error('AudioContext not supported:', e);
+        }
+      }
+      return audioContext;
+    }
+
     // App state
     let state = {
-      tasks: storage.load('focusTasks', [
-        { id: 1, name: 'Coding', allocated: 90, completed: 0 },
-        { id: 2, name: 'Exercise', allocated: 30, completed: 0 },
-        { id: 3, name: 'Reading', allocated: 45, completed: 0 }
-      ]),
+      tasks: [],
       currentTaskIndex: 0,
       isTimerRunning: false,
       showManageTasks: false,
       timerInterval: null,
-      timerStartTime: storage.load('timerStartTime', null),
-      activeTaskId: storage.load('activeTaskId', null)
+      timerStartTime: null,
+      activeTaskId: null,
+      isRendering: false
     };
+
+    // Initialize state from storage
+    function initializeState() {
+      const defaultTasks = [
+        { id: 1, name: 'Coding', allocated: 90, completed: 0 },
+        { id: 2, name: 'Exercise', allocated: 30, completed: 0 },
+        { id: 3, name: 'Reading', allocated: 45, completed: 0 }
+      ];
+      
+      state.tasks = storage.load('focusTasks', defaultTasks);
+      state.timerStartTime = storage.load('timerStartTime', null);
+      state.activeTaskId = storage.load('activeTaskId', null);
+      
+      // Validate loaded tasks
+      if (!Array.isArray(state.tasks) || state.tasks.length === 0) {
+        state.tasks = defaultTasks;
+        saveTasks();
+      }
+      
+      // Ensure all tasks have required fields
+      state.tasks = state.tasks.map(task => ({
+        id: task.id || Date.now(),
+        name: task.name || 'Unnamed Task',
+        allocated: typeof task.allocated === 'number' && task.allocated > 0 ? task.allocated : 30,
+        completed: typeof task.completed === 'number' && task.completed >= 0 ? task.completed : 0
+      }));
+    }
 
     function saveTasks() {
       storage.save('focusTasks', state.tasks);
@@ -106,46 +224,14 @@
       storage.save('activeTaskId', state.activeTaskId);
     }
 
-    function checkTimerOnLoad() {
-      if (state.timerStartTime && state.activeTaskId) {
-        const now = Date.now();
-        const elapsedMinutes = (now - state.timerStartTime) / 60000;
-        
-        const taskIndex = state.tasks.findIndex(t => t.id === state.activeTaskId);
-        if (taskIndex !== -1) {
-          state.tasks[taskIndex].completed = Math.min(
-            state.tasks[taskIndex].completed + elapsedMinutes,
-            state.tasks[taskIndex].allocated
-          );
-          saveTasks();
-          
-          if (state.tasks[taskIndex].completed >= state.tasks[taskIndex].allocated) {
-            state.timerStartTime = null;
-            state.activeTaskId = null;
-            state.isTimerRunning = false;
-            saveTimerState();
-            playCompletionSound();
-            // Don't auto-advance to next task
-          } else {
-            state.isTimerRunning = true;
-            state.timerStartTime = now;
-            saveTimerState();
-          }
-        } else {
-          // Task was deleted while timer was running
-          state.timerStartTime = null;
-          state.activeTaskId = null;
-          state.isTimerRunning = false;
-          saveTimerState();
-        }
-      }
-    }
-
     function getIncompleteTasks() {
-      return state.tasks.filter(t => t.completed < t.allocated);
+      return state.tasks.filter(t => t && t.completed < t.allocated);
     }
 
     function formatTime(minutes) {
+      if (typeof minutes !== 'number' || isNaN(minutes)) {
+        return '0m';
+      }
       const hrs = Math.floor(minutes / 60);
       const mins = Math.floor(minutes % 60);
       if (hrs > 0) {
@@ -161,18 +247,23 @@
       if (incompleteTasks.length === 0) return;
       
       const currentTask = incompleteTasks[state.currentTaskIndex];
+      if (!currentTask) return;
+      
       state.timerStartTime = Date.now();
       state.activeTaskId = currentTask.id;
       saveTimerState();
       
       state.timerInterval = setInterval(function() {
-        if (!state.timerStartTime || !state.activeTaskId) return;
+        if (!state.timerStartTime || !state.activeTaskId) {
+          stopTimer();
+          return;
+        }
         
         const now = Date.now();
         const elapsedMinutes = (now - state.timerStartTime) / 60000;
         
-        const taskIndex = state.tasks.findIndex(t => t.id === state.activeTaskId);
-        if (taskIndex !== -1) {
+        const taskIndex = state.tasks.findIndex(t => t && t.id === state.activeTaskId);
+        if (taskIndex !== -1 && state.tasks[taskIndex]) {
           state.tasks[taskIndex].completed = Math.min(
             state.tasks[taskIndex].completed + elapsedMinutes,
             state.tasks[taskIndex].allocated
@@ -188,6 +279,8 @@
             playCompletionSound();
             render();
           }
+        } else {
+          stopTimer();
         }
       }, 1000);
     }
@@ -234,16 +327,24 @@
 
     function resetAllTasks() {
       stopTimer();
-      state.tasks = state.tasks.map(t => ({ ...t, completed: 0 }));
+      state.tasks = state.tasks.map(t => t ? { ...t, completed: 0 } : t).filter(Boolean);
       state.currentTaskIndex = 0;
       state.isTimerRunning = false;
       saveTasks();
       render();
     }
 
+    function validateMinutes(value) {
+      const num = parseFloat(value);
+      if (isNaN(num) || num <= 0) {
+        return null;
+      }
+      return Math.max(0.5, Math.round(num * 2) / 2); // Round to nearest 0.5
+    }
+
     function addTask(name, allocated) {
       const validatedTime = validateMinutes(allocated);
-      if (!name.trim()) {
+      if (!name || !name.trim()) {
         alert('Task name cannot be empty');
         return false;
       }
@@ -252,7 +353,7 @@
         return false;
       }
       const newTask = {
-        id: Date.now(),
+        id: Date.now() + Math.random(),
         name: name.trim(),
         allocated: validatedTime,
         completed: 0
@@ -264,19 +365,17 @@
     }
 
     function deleteTask(id) {
-      const task = state.tasks.find(t => t.id === id);
+      const task = state.tasks.find(t => t && t.id === id);
       if (!task) return;
       
-      if (confirm(`Delete "${task.name}"?`)) {
-        state.tasks = state.tasks.filter(t => t.id !== id);
+      if (confirm('Delete "' + task.name + '"?')) {
+        state.tasks = state.tasks.filter(t => t && t.id !== id);
         
-        // Stop timer if we deleted the active task
         if (state.activeTaskId === id) {
           stopTimer();
           state.isTimerRunning = false;
         }
         
-        // Adjust current index if needed
         const incompleteTasks = getIncompleteTasks();
         if (state.currentTaskIndex >= incompleteTasks.length) {
           state.currentTaskIndex = Math.max(0, incompleteTasks.length - 1);
@@ -287,13 +386,36 @@
       }
     }
 
+    function updateTask(id, name, allocated) {
+      const validatedTime = validateMinutes(allocated);
+      if (!name || !name.trim()) {
+        alert('Task name cannot be empty');
+        return;
+      }
+      if (validatedTime === null) {
+        alert('Please enter a valid time (greater than 0)');
+        return;
+      }
+      const taskIndex = state.tasks.findIndex(t => t && t.id === id);
+      if (taskIndex !== -1 && state.tasks[taskIndex]) {
+        state.tasks[taskIndex].name = name.trim();
+        state.tasks[taskIndex].allocated = validatedTime;
+        // Adjust completed if it exceeds new allocated
+        state.tasks[taskIndex].completed = Math.min(
+          state.tasks[taskIndex].completed,
+          validatedTime
+        );
+        saveTasks();
+        render();
+      }
+    }
+
     function completeTask(id) {
-      const taskIndex = state.tasks.findIndex(t => t.id === id);
-      if (taskIndex !== -1) {
+      const taskIndex = state.tasks.findIndex(t => t && t.id === id);
+      if (taskIndex !== -1 && state.tasks[taskIndex]) {
         state.tasks[taskIndex].completed = state.tasks[taskIndex].allocated;
         saveTasks();
         
-        // Check if we just completed all tasks
         const incompleteTasks = getIncompleteTasks();
         if (incompleteTasks.length === 0) {
           playCompletionSound();
@@ -304,73 +426,84 @@
     }
 
     function resetTask(id) {
-      const taskIndex = state.tasks.findIndex(t => t.id === id);
-      if (taskIndex !== -1) {
+      const taskIndex = state.tasks.findIndex(t => t && t.id === id);
+      if (taskIndex !== -1 && state.tasks[taskIndex]) {
         state.tasks[taskIndex].completed = 0;
         saveTasks();
         render();
       }
     }
 
+    function moveTask(fromIndex, toIndex) {
+      if (fromIndex < 0 || fromIndex >= state.tasks.length || 
+          toIndex < 0 || toIndex >= state.tasks.length ||
+          fromIndex === toIndex) {
+        return;
+      }
+      const task = state.tasks.splice(fromIndex, 1)[0];
+      state.tasks.splice(toIndex, 0, task);
+      saveTasks();
+      render();
+    }
+
     function playCompletionSound() {
       try {
-        // Vibrate phone (3 short bursts)
+        // Vibrate phone
         if ('vibrate' in navigator) {
           navigator.vibrate([200, 100, 200, 100, 200]);
         }
         
-        // Play loud completion sound (3 beeps)
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        
-        function playBeep(startTime, frequency) {
-          const oscillator = audioContext.createOscillator();
-          const gainNode = audioContext.createGain();
+        // Play sound
+        const ctx = getAudioContext();
+        if (ctx) {
+          function playBeep(startTime, frequency) {
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            
+            oscillator.frequency.value = frequency;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0.8, startTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.3);
+            
+            oscillator.start(startTime);
+            oscillator.stop(startTime + 0.3);
+          }
           
-          oscillator.connect(gainNode);
-          gainNode.connect(audioContext.destination);
-          
-          oscillator.frequency.value = frequency;
-          oscillator.type = 'sine';
-          
-          gainNode.gain.setValueAtTime(0.8, startTime); // Much louder
-          gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.3);
-          
-          oscillator.start(startTime);
-          oscillator.stop(startTime + 0.3);
+          const now = ctx.currentTime;
+          playBeep(now, 600);
+          playBeep(now + 0.35, 800);
+          playBeep(now + 0.7, 1000);
         }
         
-        // Three ascending beeps
-        playBeep(audioContext.currentTime, 600);
-        playBeep(audioContext.currentTime + 0.35, 800);
-        playBeep(audioContext.currentTime + 0.7, 1000);
-        
-        // Show browser notification
+        // Show notification
         if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('Task Complete! 🎉', {
+          const notification = new Notification('Task Complete! 🎉', {
             body: 'Great job! Time to move on.',
             icon: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Crect fill="%234f46e5" width="100" height="100"/%3E%3Ctext x="50" y="70" font-size="60" text-anchor="middle" fill="white"%3E✓%3C/text%3E%3C/svg%3E',
             tag: 'task-complete',
             requireInteraction: false
           });
+          
+          setTimeout(function() {
+            notification.close();
+          }, 5000);
         }
         
       } catch (e) {
-        console.log('Could not play notification:', e);
-      }
-    }
-    
-    function requestNotificationPermission() {
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
+        console.error('Notification error:', e);
       }
     }
 
-    function validateMinutes(value) {
-      const num = parseFloat(value);
-      if (isNaN(num) || num <= 0) {
-        return null;
+    function requestNotificationPermission() {
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(function(err) {
+          console.log('Notification permission denied:', err);
+        });
       }
-      return Math.round(num * 60) / 60; // Round to nearest minute
     }
 
     function exportTasks() {
@@ -385,11 +518,14 @@
         const url = URL.createObjectURL(dataBlob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = 'focus-tasks-backup-' + new Date().toISOString().split('T')[0] + '.json';
+        const dateStr = new Date().toISOString().split('T')[0];
+        link.download = 'focus-tasks-backup-' + dateStr + '.json';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        setTimeout(function() {
+          URL.revokeObjectURL(url);
+        }, 100);
       } catch (err) {
         alert('Error exporting tasks: ' + err.message);
       }
@@ -408,7 +544,6 @@
           try {
             const imported = JSON.parse(event.target.result);
             
-            // Validate imported data
             if (!Array.isArray(imported)) {
               alert('Invalid file format: expected an array of tasks');
               return;
@@ -419,20 +554,22 @@
               return;
             }
             
-            // Validate each task has required fields
-            const isValid = imported.every(task => 
-              task.id && 
-              task.name && 
-              typeof task.allocated === 'number' && 
-              typeof task.completed === 'number'
-            );
+            const isValid = imported.every(function(task) {
+              return task && 
+                     task.id && 
+                     task.name && 
+                     typeof task.allocated === 'number' && 
+                     typeof task.completed === 'number';
+            });
             
             if (!isValid) {
               alert('Invalid task data format');
               return;
             }
             
-            if (confirm(`This will replace all ${state.tasks.length} current tasks with ${imported.length} imported tasks. Continue?`)) {
+            const msg = 'This will replace all ' + state.tasks.length + 
+                       ' current tasks with ' + imported.length + ' imported tasks. Continue?';
+            if (confirm(msg)) {
               stopTimer();
               state.isTimerRunning = false;
               state.currentTaskIndex = 0;
@@ -453,34 +590,37 @@
       input.click();
     }
 
-    function updateTask(id, name, allocated) {
-      const validatedTime = validateMinutes(allocated);
-      if (!name.trim()) {
-        alert('Task name cannot be empty');
-        return;
+    function checkTimerOnLoad() {
+      if (state.timerStartTime && state.activeTaskId) {
+        const now = Date.now();
+        const elapsedMinutes = (now - state.timerStartTime) / 60000;
+        
+        const taskIndex = state.tasks.findIndex(t => t && t.id === state.activeTaskId);
+        if (taskIndex !== -1 && state.tasks[taskIndex]) {
+          state.tasks[taskIndex].completed = Math.min(
+            state.tasks[taskIndex].completed + elapsedMinutes,
+            state.tasks[taskIndex].allocated
+          );
+          saveTasks();
+          
+          if (state.tasks[taskIndex].completed >= state.tasks[taskIndex].allocated) {
+            state.timerStartTime = null;
+            state.activeTaskId = null;
+            state.isTimerRunning = false;
+            saveTimerState();
+            playCompletionSound();
+          } else {
+            state.isTimerRunning = true;
+            state.timerStartTime = now;
+            saveTimerState();
+          }
+        } else {
+          state.timerStartTime = null;
+          state.activeTaskId = null;
+          state.isTimerRunning = false;
+          saveTimerState();
+        }
       }
-      if (validatedTime === null) {
-        alert('Please enter a valid time (greater than 0)');
-        return;
-      }
-      const taskIndex = state.tasks.findIndex(t => t.id === id);
-      if (taskIndex !== -1) {
-        state.tasks[taskIndex].name = name.trim();
-        state.tasks[taskIndex].allocated = validatedTime;
-        saveTasks();
-        render();
-      }
-    }
-
-    function moveTask(fromIndex, toIndex) {
-      if (fromIndex < 0 || fromIndex >= state.tasks.length || 
-          toIndex < 0 || toIndex >= state.tasks.length) {
-        return;
-      }
-      const task = state.tasks.splice(fromIndex, 1)[0];
-      state.tasks.splice(toIndex, 0, task);
-      saveTasks();
-      render();
     }
 
     // Render functions
@@ -488,285 +628,308 @@
       const incompleteTasks = getIncompleteTasks();
       
       if (incompleteTasks.length === 0) {
-        return `
-          <div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-            <div class="bg-gray-800 rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
-              <div class="w-24 h-24 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                <svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-              </div>
-              <h2 class="text-3xl font-bold text-white mb-4">All Tasks Complete!</h2>
-              <p class="text-gray-400 mb-8">You've finished all your tasks. Great work!</p>
-              <button onclick="resetAllTasks()" class="bg-green-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-green-700 transition-colors w-full">
-                Start New Cycle
-              </button>
-            </div>
-          </div>
-        `;
+        return '<div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">' +
+          '<div class="bg-gray-800 rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">' +
+            '<div class="w-24 h-24 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-6">' +
+              '<svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<polyline points="20 6 9 17 4 12"></polyline>' +
+              '</svg>' +
+            '</div>' +
+            '<h2 class="text-3xl font-bold text-white mb-4">All Tasks Complete!</h2>' +
+            '<p class="text-gray-400 mb-8">You\'ve finished all your tasks. Great work!</p>' +
+            '<button onclick="resetAllTasks()" class="bg-green-600 text-white px-6 py-3 rounded-full font-semibold transition-colors w-full">' +
+              'Start New Cycle' +
+            '</button>' +
+          '</div>' +
+        '</div>';
       }
 
-      // Ensure currentTaskIndex is valid
       if (state.currentTaskIndex >= incompleteTasks.length) {
         state.currentTaskIndex = 0;
       }
 
       const currentTask = incompleteTasks[state.currentTaskIndex];
       if (!currentTask) {
-        // Fallback - should never happen but defensive programming
-        return `
-          <div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-            <div class="bg-gray-800 rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
-              <p class="text-gray-400 mb-8">No tasks available. Add some tasks to get started!</p>
-              <button onclick="state.showManageTasks = true; render()" class="bg-indigo-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-indigo-700 transition-colors w-full">
-                Manage Tasks
-              </button>
-            </div>
-          </div>
-        `;
+        return '<div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">' +
+          '<div class="bg-gray-800 rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">' +
+            '<p class="text-gray-400 mb-8">No tasks available. Add some tasks to get started!</p>' +
+            '<button onclick="state.showManageTasks = true; render()" class="bg-indigo-600 text-white px-6 py-3 rounded-full font-semibold transition-colors w-full">' +
+              'Manage Tasks' +
+            '</button>' +
+          '</div>' +
+        '</div>';
       }
 
       const progress = Math.min((currentTask.completed / currentTask.allocated) * 100, 100);
+      const taskNum = incompleteTasks.findIndex(function(t) { return t.id === currentTask.id; }) + 1;
 
-      return `
-        <div class="min-h-screen bg-gray-900 flex flex-col">
-          <div class="flex-1 flex items-center justify-center p-4">
-            <div class="bg-gray-800 rounded-3xl shadow-2xl p-8 max-w-md w-full">
-              <div class="text-center mb-8">
-                <div class="inline-block bg-indigo-900 text-indigo-300 px-4 py-1 rounded-full text-sm font-medium mb-4">
-                  Task ${incompleteTasks.findIndex(t => t.id === currentTask.id) + 1} of ${incompleteTasks.length}
-                </div>
-                <h1 class="text-4xl font-bold text-white mb-2">${currentTask.name}</h1>
-                <div class="text-gray-400 text-lg">
-                  ${formatTime(currentTask.completed)} / ${formatTime(currentTask.allocated)}
-                </div>
-              </div>
-
-              <div class="mb-8">
-                <div class="bg-gray-700 rounded-full h-4 overflow-hidden">
-                  <div class="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all duration-1000 ease-out" style="width: ${progress}%"></div>
-                </div>
-              </div>
-
-              <div class="flex gap-3 mb-6">
-                <button onclick="toggleTimer()" class="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-semibold text-lg transition-all ${state.isTimerRunning ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'} text-white">
-                  ${state.isTimerRunning ? 
-                    '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Pause' :
-                    '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Start'
-                  }
-                </button>
-                ${incompleteTasks.length > 1 ? `
-                  <button onclick="nextTask()" class="px-6 py-4 bg-gray-700 hover:bg-gray-600 rounded-2xl transition-colors text-white">
-                    <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polygon points="5 4 15 12 5 20 5 4"></polygon>
-                      <line x1="19" y1="5" x2="19" y2="19"></line>
-                    </svg>
-                  </button>
-                ` : ''}
-              </div>
-
-              ${incompleteTasks.length > 1 ? `
-                <div class="flex gap-2 justify-center mb-6">
-                  ${incompleteTasks.map((task, idx) => `
-                    <button onclick="selectTask(${idx})" class="h-2 rounded-full transition-all ${idx === state.currentTaskIndex ? 'bg-indigo-500 w-8' : 'bg-gray-600 w-2'}"></button>
-                  `).join('')}
-                </div>
-              ` : ''}
-
-              <button onclick="state.showManageTasks = true; render()" class="w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-2xl transition-colors font-medium">
-                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="8" y1="6" x2="21" y2="6"></line>
-                  <line x1="8" y1="12" x2="21" y2="12"></line>
-                  <line x1="8" y1="18" x2="21" y2="18"></line>
-                  <line x1="3" y1="6" x2="3.01" y2="6"></line>
-                  <line x1="3" y1="12" x2="3.01" y2="12"></line>
-                  <line x1="3" y1="18" x2="3.01" y2="18"></line>
-                </svg>
-                Manage Tasks
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
+      return '<div class="min-h-screen bg-gray-900 flex flex-col">' +
+        '<div class="flex-1 flex items-center justify-center p-4">' +
+          '<div class="bg-gray-800 rounded-3xl shadow-2xl p-8 max-w-md w-full">' +
+            '<div class="text-center mb-8">' +
+              '<div class="inline-block bg-indigo-900 text-indigo-300 px-4 py-1 rounded-full text-sm font-medium mb-4">' +
+                'Task ' + taskNum + ' of ' + incompleteTasks.length +
+              '</div>' +
+              '<h1 class="text-4xl font-bold text-white mb-2">' + escapeHtml(currentTask.name) + '</h1>' +
+              '<div class="text-gray-400 text-lg">' +
+                formatTime(currentTask.completed) + ' / ' + formatTime(currentTask.allocated) +
+              '</div>' +
+            '</div>' +
+            '<div class="mb-8">' +
+              '<div class="bg-gray-700 rounded-full h-4 overflow-hidden">' +
+                '<div class="bg-gradient-to-r h-full transition-all" style="width: ' + progress + '%; transition-duration: 1000ms;"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="flex gap-3 mb-6">' +
+              '<button onclick="toggleTimer()" class="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-semibold text-lg transition-all ' +
+                (state.isTimerRunning ? 'bg-red-600' : 'bg-indigo-600') + ' text-white">' +
+                (state.isTimerRunning ? 
+                  '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Pause' :
+                  '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Start'
+                ) +
+              '</button>' +
+              (incompleteTasks.length > 1 ? 
+                '<button onclick="nextTask()" class="px-6 py-4 bg-gray-700 rounded-2xl transition-colors text-white">' +
+                  '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                    '<polygon points="5 4 15 12 5 20 5 4"></polygon>' +
+                    '<line x1="19" y1="5" x2="19" y2="19"></line>' +
+                  '</svg>' +
+                '</button>' : ''
+              ) +
+            '</div>' +
+            (incompleteTasks.length > 1 ? 
+              '<div class="flex gap-2 justify-center mb-6">' +
+                incompleteTasks.map(function(task, idx) {
+                  return '<button onclick="selectTask(' + idx + ')" class="h-2 rounded-full transition-all ' +
+                    (idx === state.currentTaskIndex ? 'bg-indigo-500 w-8' : 'bg-gray-600 w-2') +
+                    '"></button>';
+                }).join('') +
+              '</div>' : ''
+            ) +
+            '<button onclick="state.showManageTasks = true; render()" class="w-full flex items-center justify-center gap-2 bg-gray-700 text-white py-3 rounded-2xl transition-colors font-medium">' +
+              '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<line x1="8" y1="6" x2="21" y2="6"></line>' +
+                '<line x1="8" y1="12" x2="21" y2="12"></line>' +
+                '<line x1="8" y1="18" x2="21" y2="18"></line>' +
+                '<line x1="3" y1="6" x2="3.01" y2="6"></line>' +
+                '<line x1="3" y1="12" x2="3.01" y2="12"></line>' +
+                '<line x1="3" y1="18" x2="3.01" y2="18"></line>' +
+              '</svg>' +
+              'Manage Tasks' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
     }
 
     function renderManageView() {
-      return `
-        <div class="min-h-screen bg-gray-900 p-4 no-scrollbar" style="overflow-y: auto;">
-          <div class="max-w-md mx-auto">
-            <div class="flex items-center gap-3 mb-6">
-              <button onclick="state.showManageTasks = false; render()" class="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-white transition-colors">
-                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="19" y1="12" x2="5" y2="12"></line>
-                  <polyline points="12 19 5 12 12 5"></polyline>
-                </svg>
-              </button>
-              <h2 class="text-2xl font-bold text-white flex-1">Manage Tasks</h2>
-              <button onclick="exportTasks()" class="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition-colors" title="Export">
-                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-              </button>
-              <button onclick="importTasks()" class="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition-colors" title="Import">
-                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="17 8 12 3 7 8"></polyline>
-                  <line x1="12" y1="3" x2="12" y2="15"></line>
-                </svg>
-              </button>
-              <button onclick="showAddForm()" class="p-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-white transition-colors">
-                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-              </button>
-            </div>
+      return '<div class="min-h-screen bg-gray-900 p-4 no-scrollbar" style="overflow-y: auto;">' +
+        '<div class="max-w-md mx-auto">' +
+          '<div class="flex items-center gap-3 mb-6">' +
+            '<button onclick="state.showManageTasks = false; render()" class="p-2 bg-gray-800 rounded-lg text-white transition-colors">' +
+              '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<line x1="19" y1="12" x2="5" y2="12"></line>' +
+                '<polyline points="12 19 5 12 12 5"></polyline>' +
+              '</svg>' +
+            '</button>' +
+            '<h2 class="text-2xl font-bold text-white flex-1">Manage Tasks</h2>' +
+            '<button onclick="exportTasks()" class="p-2 bg-gray-700 rounded-lg text-white transition-colors" title="Export">' +
+              '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>' +
+                '<polyline points="7 10 12 15 17 10"></polyline>' +
+                '<line x1="12" y1="15" x2="12" y2="3"></line>' +
+              '</svg>' +
+            '</button>' +
+            '<button onclick="importTasks()" class="p-2 bg-gray-700 rounded-lg text-white transition-colors" title="Import">' +
+              '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>' +
+                '<polyline points="17 8 12 3 7 8"></polyline>' +
+                '<line x1="12" y1="3" x2="12" y2="15"></line>' +
+              '</svg>' +
+            '</button>' +
+            '<button onclick="showAddForm()" class="p-2 bg-indigo-600 rounded-lg text-white transition-colors">' +
+              '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                '<line x1="12" y1="5" x2="12" y2="19"></line>' +
+                '<line x1="5" y1="12" x2="19" y2="12"></line>' +
+              '</svg>' +
+            '</button>' +
+          '</div>' +
+          '<div id="add-form-container"></div>' +
+          '<div class="space-y-3" id="tasks-list">' +
+            state.tasks.map(function(task, index) {
+              if (!task) return '';
+              const progress = Math.min((task.completed / task.allocated) * 100, 100);
+              const isComplete = task.completed >= task.allocated;
+              return '<div class="bg-gray-800 rounded-2xl p-4" data-task-id="' + task.id + '">' +
+                '<div class="flex items-center gap-3">' +
+                  '<div class="text-gray-500 cursor-move" style="touch-action: none;">' +
+                    '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                      '<circle cx="9" cy="5" r="1"></circle>' +
+                      '<circle cx="9" cy="12" r="1"></circle>' +
+                      '<circle cx="9" cy="19" r="1"></circle>' +
+                      '<circle cx="15" cy="5" r="1"></circle>' +
+                      '<circle cx="15" cy="12" r="1"></circle>' +
+                      '<circle cx="15" cy="19" r="1"></circle>' +
+                    '</svg>' +
+                  '</div>' +
+                  '<div class="flex-1 cursor-pointer" onclick="showEditForm(' + task.id + ', \'' + escapeHtml(task.name).replace(/'/g, "\\'") + '\', ' + task.allocated + ')">' +
+                    '<div class="text-white font-medium mb-1">' + escapeHtml(task.name) + '</div>' +
+                    '<div class="text-sm text-gray-400">' +
+                      formatTime(task.completed) + ' / ' + formatTime(task.allocated) +
+                    '</div>' +
+                    '<div class="bg-gray-700 rounded-full h-1.5 mt-2 overflow-hidden">' +
+                      '<div class="bg-indigo-500 h-full transition-all" style="width: ' + progress + '%"></div>' +
+                    '</div>' +
+                  '</div>' +
+                  '<div class="flex flex-col gap-1">' +
+                    (!isComplete ? 
+                      '<button onclick="completeTask(' + task.id + ')" class="p-1.5 bg-green-600 rounded-lg text-white transition-colors" title="Mark Complete">' +
+                        '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                          '<polyline points="20 6 9 17 4 12"></polyline>' +
+                        '</svg>' +
+                      '</button>' : ''
+                    ) +
+                    (task.completed > 0 ? 
+                      '<button onclick="resetTask(' + task.id + ')" class="p-1.5 bg-yellow-600 rounded-lg text-white transition-colors" title="Reset Progress">' +
+                        '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                          '<polyline points="23 4 23 10 17 10"></polyline>' +
+                          '<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>' +
+                        '</svg>' +
+                      '</button>' : ''
+                    ) +
+                    '<button onclick="deleteTask(' + task.id + ')" class="p-1.5 bg-red-600 rounded-lg text-white transition-colors" title="Delete">' +
+                      '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                        '<polyline points="3 6 5 6 21 6"></polyline>' +
+                        '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>' +
+                      '</svg>' +
+                    '</button>' +
+                  '</div>' +
+                '</div>' +
+              '</div>';
+            }).join('') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
 
-            <div id="add-form-container"></div>
-
-            <div class="space-y-3" id="tasks-list">
-              ${state.tasks.map((task, index) => {
-                const progress = Math.min((task.completed / task.allocated) * 100, 100);
-                const isComplete = task.completed >= task.allocated;
-                return `
-                  <div class="bg-gray-800 rounded-2xl p-4" data-task-id="${task.id}">
-                    <div class="flex items-center gap-3">
-                      <div class="text-gray-500 cursor-move" style="touch-action: none;">
-                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <circle cx="9" cy="5" r="1"></circle>
-                          <circle cx="9" cy="12" r="1"></circle>
-                          <circle cx="9" cy="19" r="1"></circle>
-                          <circle cx="15" cy="5" r="1"></circle>
-                          <circle cx="15" cy="12" r="1"></circle>
-                          <circle cx="15" cy="19" r="1"></circle>
-                        </svg>
-                      </div>
-                      <div class="flex-1 cursor-pointer" onclick="showEditForm(${task.id}, '${task.name.replace(/'/g, "\\'")}', ${task.allocated})">
-                        <div class="text-white font-medium mb-1">${task.name}</div>
-                        <div class="text-sm text-gray-400">
-                          ${formatTime(task.completed)} / ${formatTime(task.allocated)}
-                        </div>
-                        <div class="bg-gray-700 rounded-full h-1.5 mt-2 overflow-hidden">
-                          <div class="bg-indigo-500 h-full transition-all" style="width: ${progress}%"></div>
-                        </div>
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        ${!isComplete ? `
-                          <button onclick="completeTask(${task.id})" class="p-1.5 bg-green-600 hover:bg-green-700 rounded-lg text-white transition-colors" title="Mark Complete">
-                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                              <polyline points="20 6 9 17 4 12"></polyline>
-                            </svg>
-                          </button>
-                        ` : ''}
-                        ${task.completed > 0 ? `
-                          <button onclick="resetTask(${task.id})" class="p-1.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-white transition-colors" title="Reset Progress">
-                            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                              <polyline points="23 4 23 10 17 10"></polyline>
-                              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-                            </svg>
-                          </button>
-                        ` : ''}
-                        <button onclick="deleteTask(${task.id})" class="p-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-white transition-colors" title="Delete">
-                          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="3 6 5 6 21 6"></polyline>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          </div>
-        </div>
-      `;
+    function escapeHtml(text) {
+      var map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      };
+      return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
     }
 
     function showAddForm() {
-      const container = document.getElementById('add-form-container');
-      container.innerHTML = `
-        <div class="bg-gray-800 rounded-2xl p-4 mb-4">
-          <input type="text" id="new-task-name" placeholder="Task name" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-2">
-          <div class="flex gap-2 mb-2">
-            <button onclick="setQuickTime(15)" class="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm">15m</button>
-            <button onclick="setQuickTime(30)" class="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm">30m</button>
-            <button onclick="setQuickTime(60)" class="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm">1h</button>
-            <button onclick="setQuickTime(90)" class="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm">1.5h</button>
-          </div>
-          <div class="flex gap-2">
-            <input type="number" step="0.5" id="new-task-time" placeholder="Minutes (or use buttons above)" class="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <button onclick="submitAddForm()" class="px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors font-medium">Add</button>
-            <button onclick="cancelAddForm()" class="px-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors">✕</button>
-          </div>
-        </div>
-      `;
-      document.getElementById('new-task-name').focus();
+      var container = document.getElementById('add-form-container');
+      if (!container) return;
+      
+      container.innerHTML = 
+        '<div class="bg-gray-800 rounded-2xl p-4 mb-4">' +
+          '<input type="text" id="new-task-name" placeholder="Task name" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white mb-2" style="color: white;">' +
+          '<div class="flex gap-2 mb-2">' +
+            '<button onclick="setQuickTime(15)" class="flex-1 px-3 py-2 bg-gray-700 text-white rounded-lg transition-colors text-sm">15m</button>' +
+            '<button onclick="setQuickTime(30)" class="flex-1 px-3 py-2 bg-gray-700 text-white rounded-lg transition-colors text-sm">30m</button>' +
+            '<button onclick="setQuickTime(60)" class="flex-1 px-3 py-2 bg-gray-700 text-white rounded-lg transition-colors text-sm">1h</button>' +
+            '<button onclick="setQuickTime(90)" class="flex-1 px-3 py-2 bg-gray-700 text-white rounded-lg transition-colors text-sm">1.5h</button>' +
+          '</div>' +
+          '<div class="flex gap-2">' +
+            '<input type="number" step="0.5" id="new-task-time" placeholder="Minutes (or use buttons above)" class="flex-1 px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white" style="color: white;">' +
+            '<button onclick="submitAddForm()" class="px-6 bg-indigo-600 text-white rounded-lg transition-colors font-medium">Add</button>' +
+            '<button onclick="cancelAddForm()" class="px-4 bg-gray-700 text-white rounded-lg transition-colors">✕</button>' +
+          '</div>' +
+        '</div>';
+      
+      var input = document.getElementById('new-task-name');
+      if (input) input.focus();
     }
 
     function setQuickTime(minutes) {
-      document.getElementById('new-task-time').value = minutes;
+      var input = document.getElementById('new-task-time');
+      if (input) input.value = minutes;
     }
 
     function submitAddForm() {
-      const name = document.getElementById('new-task-name').value;
-      const time = document.getElementById('new-task-time').value;
+      var nameInput = document.getElementById('new-task-name');
+      var timeInput = document.getElementById('new-task-time');
+      if (!nameInput || !timeInput) return;
+      
+      var name = nameInput.value;
+      var time = timeInput.value;
       if (addTask(name, time)) {
         cancelAddForm();
       }
     }
 
     function cancelAddForm() {
-      document.getElementById('add-form-container').innerHTML = '';
+      var container = document.getElementById('add-form-container');
+      if (container) container.innerHTML = '';
     }
 
     function showEditForm(id, name, allocated) {
-      const taskEl = document.querySelector(`[data-task-id="${id}"]`);
-      taskEl.innerHTML = `
-        <div>
-          <input type="text" id="edit-name-${id}" value="${name}" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white mb-2 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <div class="flex gap-2">
-            <input type="number" step="0.5" id="edit-time-${id}" value="${allocated}" class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <button onclick="submitEdit(${id})" class="px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors text-sm">Save</button>
-            <button onclick="render()" class="px-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors text-sm">Cancel</button>
-          </div>
-        </div>
-      `;
-      document.getElementById(`edit-name-${id}`).focus();
+      var taskEl = document.querySelector('[data-task-id="' + id + '"]');
+      if (!taskEl) return;
+      
+      taskEl.innerHTML = 
+        '<div>' +
+          '<input type="text" id="edit-name-' + id + '" value="' + name + '" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white mb-2" style="color: white;">' +
+          '<div class="flex gap-2">' +
+            '<input type="number" step="0.5" id="edit-time-' + id + '" value="' + allocated + '" class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" style="color: white;">' +
+            '<button onclick="submitEdit(' + id + ')" class="px-4 bg-indigo-600 text-white rounded-lg transition-colors text-sm">Save</button>' +
+            '<button onclick="render()" class="px-4 bg-gray-700 text-white rounded-lg transition-colors text-sm">Cancel</button>' +
+          '</div>' +
+        '</div>';
+      
+      var input = document.getElementById('edit-name-' + id);
+      if (input) input.focus();
     }
 
     function submitEdit(id) {
-      const name = document.getElementById(`edit-name-${id}`).value;
-      const time = document.getElementById(`edit-time-${id}`).value;
+      var nameInput = document.getElementById('edit-name-' + id);
+      var timeInput = document.getElementById('edit-time-' + id);
+      if (!nameInput || !timeInput) return;
+      
+      var name = nameInput.value;
+      var time = timeInput.value;
       updateTask(id, name, time);
     }
 
     function render() {
-      const app = document.getElementById('app');
-      if (state.showManageTasks) {
-        app.innerHTML = renderManageView();
-        setupDragAndDrop();
-      } else {
-        app.innerHTML = renderTimerView();
+      if (state.isRendering) return;
+      state.isRendering = true;
+      
+      try {
+        var app = document.getElementById('app');
+        if (!app) return;
+        
+        if (state.showManageTasks) {
+          app.innerHTML = renderManageView();
+          setupDragAndDrop();
+        } else {
+          app.innerHTML = renderTimerView();
+        }
+      } finally {
+        state.isRendering = false;
       }
     }
 
     function setupDragAndDrop() {
-      const tasksList = document.getElementById('tasks-list');
+      var tasksList = document.getElementById('tasks-list');
       if (!tasksList) return;
 
-      let draggedElement = null;
-      let draggedIndex = null;
-      let touchStartY = 0;
-      let touchCurrentY = 0;
-      let isDragging = false;
+      var draggedElement = null;
+      var draggedIndex = null;
+      var touchStartY = 0;
+      var touchCurrentY = 0;
+      var isDragging = false;
 
-      tasksList.querySelectorAll('[data-task-id]').forEach((el, index) => {
+      var tasks = tasksList.querySelectorAll('[data-task-id]');
+      tasks.forEach(function(el, index) {
         el.setAttribute('draggable', 'true');
         
-        // Desktop drag
         el.addEventListener('dragstart', function(e) {
           draggedElement = el;
           draggedIndex = index;
@@ -775,7 +938,8 @@
 
         el.addEventListener('dragend', function(e) {
           el.style.opacity = '1';
-          document.querySelectorAll('[data-task-id]').forEach(item => {
+          var allTasks = tasksList.querySelectorAll('[data-task-id]');
+          allTasks.forEach(function(item) {
             item.style.borderTop = '';
             item.style.borderBottom = '';
           });
@@ -784,8 +948,8 @@
         el.addEventListener('dragover', function(e) {
           e.preventDefault();
           if (draggedElement !== el) {
-            const bounding = el.getBoundingClientRect();
-            const offset = bounding.y + (bounding.height / 2);
+            var bounding = el.getBoundingClientRect();
+            var offset = bounding.y + (bounding.height / 2);
             if (e.clientY - offset > 0) {
               el.style.borderBottom = '2px solid #6366f1';
               el.style.borderTop = '';
@@ -799,13 +963,12 @@
         el.addEventListener('drop', function(e) {
           e.preventDefault();
           if (draggedElement !== el) {
-            const dropIndex = index;
+            var dropIndex = index;
             moveTask(draggedIndex, dropIndex);
           }
         });
 
-        // Mobile touch - only on grip icon
-        const gripIcon = el.querySelector('.cursor-move');
+        var gripIcon = el.querySelector('.cursor-move');
         if (gripIcon) {
           gripIcon.addEventListener('touchstart', function(e) {
             e.preventDefault();
@@ -821,15 +984,14 @@
             if (!isDragging) return;
             e.preventDefault();
             touchCurrentY = e.touches[0].clientY;
-            const deltaY = touchCurrentY - touchStartY;
+            var deltaY = touchCurrentY - touchStartY;
             
-            el.style.transform = `translateY(${deltaY}px) scale(1.05)`;
+            el.style.transform = 'translateY(' + deltaY + 'px) scale(1.05)';
             
-            // Check which element we're over
-            const elements = Array.from(tasksList.querySelectorAll('[data-task-id]'));
-            elements.forEach((item, idx) => {
+            var elements = Array.from(tasksList.querySelectorAll('[data-task-id]'));
+            elements.forEach(function(item, idx) {
               if (item === el) return;
-              const rect = item.getBoundingClientRect();
+              var rect = item.getBoundingClientRect();
               if (touchCurrentY > rect.top && touchCurrentY < rect.bottom) {
                 item.style.borderTop = idx < draggedIndex ? '2px solid #6366f1' : '';
                 item.style.borderBottom = idx > draggedIndex ? '2px solid #6366f1' : '';
@@ -845,11 +1007,11 @@
             e.preventDefault();
             isDragging = false;
             
-            const elements = Array.from(tasksList.querySelectorAll('[data-task-id]'));
-            let dropIndex = draggedIndex;
+            var elements = Array.from(tasksList.querySelectorAll('[data-task-id]'));
+            var dropIndex = draggedIndex;
             
-            elements.forEach((item, idx) => {
-              const rect = item.getBoundingClientRect();
+            elements.forEach(function(item, idx) {
+              var rect = item.getBoundingClientRect();
               if (touchCurrentY > rect.top && touchCurrentY < rect.bottom && idx !== draggedIndex) {
                 dropIndex = idx;
               }
@@ -870,23 +1032,56 @@
       });
     }
 
-    // Initial render
-    checkTimerOnLoad();
-    requestNotificationPermission();
-    render();
-    
-    // Check timer when page becomes visible again
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+      stopTimer();
+    });
+
+    // Check timer when page becomes visible
     document.addEventListener('visibilitychange', function() {
       if (!document.hidden) {
         checkTimerOnLoad();
+        if (state.isTimerRunning) {
+          startTimer();
+        }
         render();
+      } else {
+        if (state.timerInterval && state.isTimerRunning) {
+          clearInterval(state.timerInterval);
+          state.timerInterval = null;
+        }
       }
     });
-    
-    // Request notification permission on first user interaction
+
+    // Request notification permission on first interaction
+    var hasRequestedPermission = false;
     document.addEventListener('click', function() {
-      requestNotificationPermission();
+      if (!hasRequestedPermission) {
+        hasRequestedPermission = true;
+        requestNotificationPermission();
+      }
     }, { once: true });
+
+    // Initialize app
+    (function init() {
+      try {
+        initializeState();
+        checkTimerOnLoad();
+        if (state.isTimerRunning) {
+          startTimer();
+        }
+        render();
+      } catch (e) {
+        console.error('Initialization error:', e);
+        document.getElementById('app').innerHTML = 
+          '<div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">' +
+            '<div class="bg-gray-800 rounded-2xl p-8 text-center">' +
+              '<p class="text-white mb-4">Failed to initialize app</p>' +
+              '<button onclick="location.reload()" class="bg-indigo-600 text-white px-6 py-3 rounded-lg">Reload</button>' +
+            '</div>' +
+          '</div>';
+      }
+    })();
   </script>
 </body>
 </html>
