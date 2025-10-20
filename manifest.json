@@ -2,6 +2,7 @@
   "name": "Focus Task Timer",
   "short_name": "Focus",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#1f2937",
   "theme_color": "#1f2937",
@@ -15,3 +16,4 @@
     }
   ]
 }
+
