@@ -104,6 +104,7 @@ function scheduleSWAlarm(taskName, remainingMinutes) {
 
 function cancelSWAlarm() {
   if (swReg && swReg.active) {
+    console.log('[APP] Cancelling SW alarm');
     swReg.active.postMessage({ type: 'CANCEL_ALARM' });
   }
 }
@@ -334,6 +335,14 @@ function moveTask(from, to) {
   if (from < 0 || from >= state.tasks.length || to < 0 || to >= state.tasks.length || from === to) return;
   const task = state.tasks.splice(from, 1)[0];
   state.tasks.splice(to, 0, task);
+  
+  // If we moved the active task, update its index
+  if (state.activeTaskId === task.id) {
+    const incomplete = getIncompleteTasks();
+    state.currentTaskIndex = incomplete.findIndex(t => t.id === task.id);
+    if (state.currentTaskIndex === -1) state.currentTaskIndex = 0;
+  }
+  
   storage.save('focusTasks', state.tasks);
   render();
 }
@@ -397,25 +406,40 @@ function checkTimerOnLoad() {
     const elapsed = (Date.now() - state.timerStartTime) / 60000;
     const idx = state.tasks.findIndex(t => t && t.id === state.activeTaskId);
     
-    if (idx !== -1) {
+    if (idx !== -1 && state.tasks[idx]) {
+      const wasComplete = state.tasks[idx].completed >= state.tasks[idx].allocated;
+      
       state.tasks[idx].completed = Math.min(
         state.tasks[idx].completed + elapsed,
         state.tasks[idx].allocated
       );
       storage.save('focusTasks', state.tasks);
       
-      if (state.tasks[idx].completed >= state.tasks[idx].allocated) {
+      const isNowComplete = state.tasks[idx].completed >= state.tasks[idx].allocated;
+      
+      if (isNowComplete) {
         state.timerStartTime = null;
         state.activeTaskId = null;
         state.isTimerRunning = false;
         storage.save('timerStartTime', null);
         storage.save('activeTaskId', null);
-        playLocalSound();
+        
+        // Only play sound if it just completed (not already complete)
+        if (!wasComplete) {
+          playLocalSound();
+        }
       } else {
         state.isTimerRunning = true;
         state.timerStartTime = Date.now();
         storage.save('timerStartTime', state.timerStartTime);
       }
+    } else {
+      // Task was deleted
+      state.timerStartTime = null;
+      state.activeTaskId = null;
+      state.isTimerRunning = false;
+      storage.save('timerStartTime', null);
+      storage.save('activeTaskId', null);
     }
   }
 }
@@ -670,12 +694,19 @@ function setupDragAndDrop() {
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
+    console.log('[APP] Tab visible again, checking timer state...');
     checkTimerOnLoad();
-    if (state.isTimerRunning) startTimer();
+    if (state.isTimerRunning && !state.timerInterval) {
+      console.log('[APP] Restarting timer interval...');
+      startTimer();
+    }
     render();
-  } else if (state.timerInterval) {
-    clearInterval(state.timerInterval);
-    state.timerInterval = null;
+  } else {
+    console.log('[APP] Tab hidden, pausing timer interval (SW continues)...');
+    if (state.timerInterval) {
+      clearInterval(state.timerInterval);
+      state.timerInterval = null;
+    }
   }
 });
 
