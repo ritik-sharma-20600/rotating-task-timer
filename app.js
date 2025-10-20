@@ -57,6 +57,10 @@ async function registerSW() {
       swReg = await navigator.serviceWorker.register('sw.js');
       console.log('[APP] SW registered');
       
+      // Wait for SW to be ready
+      await navigator.serviceWorker.ready;
+      console.log('[APP] SW ready');
+      
       // Listen for messages from SW
       navigator.serviceWorker.addEventListener('message', function(event) {
         if (event.data.type === 'TASK_COMPLETE') {
@@ -66,7 +70,8 @@ async function registerSW() {
       });
       
       if (Notification.permission === 'default') {
-        await Notification.requestPermission();
+        const permission = await Notification.requestPermission();
+        console.log('[APP] Notification permission:', permission);
       }
     } catch (err) {
       console.error('[APP] SW registration failed:', err);
@@ -75,15 +80,22 @@ async function registerSW() {
 }
 
 function scheduleSWAlarm(taskName, remainingMinutes) {
-  if (!swReg || !swReg.active) {
-    console.log('[APP] SW not ready');
+  if (!swReg) {
+    console.log('[APP] SW not registered yet');
     return;
   }
   
-  const delayMs = remainingMinutes * 60 * 1000;
-  console.log('[APP] Scheduling SW alarm:', taskName, remainingMinutes, 'min');
+  // Wait for active worker
+  const worker = swReg.active || swReg.installing || swReg.waiting;
+  if (!worker) {
+    console.log('[APP] No SW worker available');
+    return;
+  }
   
-  swReg.active.postMessage({
+  const delayMs = Math.max(1000, remainingMinutes * 60 * 1000); // At least 1 second
+  console.log('[APP] Scheduling SW alarm:', taskName, remainingMinutes.toFixed(2), 'min =', (delayMs/1000).toFixed(1), 'seconds');
+  
+  worker.postMessage({
     type: 'SCHEDULE_ALARM',
     taskName: taskName,
     delay: delayMs
