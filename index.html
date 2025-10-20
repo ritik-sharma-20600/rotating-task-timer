@@ -166,6 +166,7 @@
     // Audio context singleton to prevent memory leaks
     let audioContext = null;
     let wakeLock = null;
+    let serviceWorkerRegistration = null;
     
     function getAudioContext() {
       if (!audioContext) {
@@ -176,6 +177,48 @@
         }
       }
       return audioContext;
+    }
+
+    async function registerServiceWorker() {
+      if ('serviceWorker' in navigator) {
+        try {
+          const registration = await navigator.serviceWorker.register('sw.js');
+          serviceWorkerRegistration = registration;
+          console.log('Service Worker registered:', registration);
+          
+          // Request notification permission
+          if (Notification.permission === 'default') {
+            await Notification.requestPermission();
+          }
+        } catch (err) {
+          console.error('Service Worker registration failed:', err);
+        }
+      }
+    }
+
+    function scheduleServiceWorkerAlarm(taskName, remainingMinutes) {
+      if (!serviceWorkerRegistration || !serviceWorkerRegistration.active) {
+        console.log('Service Worker not available');
+        return;
+      }
+      
+      const delayMs = remainingMinutes * 60 * 1000;
+      
+      serviceWorkerRegistration.active.postMessage({
+        type: 'SCHEDULE_ALARM',
+        taskName: taskName,
+        delay: delayMs
+      });
+      
+      console.log('Scheduled alarm for', taskName, 'in', remainingMinutes, 'minutes');
+    }
+
+    function cancelServiceWorkerAlarm() {
+      if (serviceWorkerRegistration && serviceWorkerRegistration.active) {
+        serviceWorkerRegistration.active.postMessage({
+          type: 'CANCEL_ALARM'
+        });
+      }
     }
 
     async function requestWakeLock() {
@@ -283,6 +326,10 @@
       state.activeTaskId = currentTask.id;
       saveTimerState();
       
+      // Schedule service worker alarm for task completion
+      const remainingMinutes = currentTask.allocated - currentTask.completed;
+      scheduleServiceWorkerAlarm(currentTask.name, remainingMinutes);
+      
       state.timerInterval = setInterval(function() {
         if (!state.timerStartTime || !state.activeTaskId) {
           stopTimer();
@@ -324,6 +371,7 @@
       state.timerStartTime = null;
       state.activeTaskId = null;
       releaseWakeLock();
+      cancelServiceWorkerAlarm();
       saveTimerState();
     }
 
@@ -1141,6 +1189,9 @@
     // Initialize app
     (function init() {
       try {
+        // Register service worker first
+        registerServiceWorker();
+        
         initializeState();
         checkTimerOnLoad();
         if (state.isTimerRunning) {
