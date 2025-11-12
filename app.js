@@ -629,10 +629,10 @@ function renderManageView() {
       <div class="space-y-3" id="tasks-list">
         ${state.library.map((t, idx) => {
           if (!t) return '';
-          // library shows name and note only (no durations)
+          // library shows name and note only (no durations). Use only id in onclicks to avoid escaping problems
           return `<div class="bg-gray-800 rounded-2xl p-4" data-lib-id="${t.id}">
             <div class="flex items-center gap-3">
-              <div style="flex:1; cursor:pointer" onclick="showEditFormLib(${t.id}, '${escapeHtml(t.name).replace(/'/g, \"\\'\")}', \`${(t.note||'').replace(/`/g, '\\`')}\`)">
+              <div style="flex:1; cursor:pointer" onclick="showEditFormLib(${t.id})">
                 <div class="text-white font-medium mb-1">${escapeHtml(t.name)}</div>
                 <div class="text-sm text-gray-400" style="white-space:pre-line; max-height:4.2em; overflow:hidden;">${escapeHtml(t.note || '')}</div>
               </div>
@@ -640,7 +640,7 @@ function renderManageView() {
                 <button onclick="showAddToLoopMenu(${t.id})" class="p-1.5 bg-indigo-600 rounded-lg text-white transition-colors" title="Add to current loop" aria-label="Add to loop">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                 </button>
-                <button onclick="showEditFormLib(${t.id}, '${escapeHtml(t.name).replace(/'/g, \"\\'\")}', \`${(t.note||'').replace(/`/g, '\\`')}\`)" class="p-1.5 bg-gray-700 rounded-lg text-white transition-colors" title="Edit" aria-label="Edit"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4h6"></path><path d="M18 8l-9 9H3v-6l9-9 6 6z"></path></svg></button>
+                <button onclick="showEditFormLib(${t.id})" class="p-1.5 bg-gray-700 rounded-lg text-white transition-colors" title="Edit" aria-label="Edit"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4h6"></path><path d="M18 8l-9 9H3v-6l9-9 6 6z"></path></svg></button>
                 <button onclick="deleteLibraryTask(${t.id})" class="p-1.5 bg-red-600 rounded-lg text-white transition-colors" title="Delete" aria-label="Delete"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
               </div>
             </div>
@@ -652,6 +652,7 @@ function renderManageView() {
     </div>
   </div>`;
 }
+
 
 /* ---------- Add / Edit library forms (compact) ---------- */
 
@@ -677,26 +678,32 @@ function submitAddLib() {
   }
 }
 
-function showEditFormLib(id, name, note) {
+function showEditFormLib(id) {
+  const lib = state.library.find(t => t.id === id);
+  if (!lib) return;
   const el = document.querySelector(`[data-lib-id="${id}"]`);
   if (!el) return;
+  // render an inline edit form using the library data (no dangerous inline escaping to onclicks)
   el.innerHTML = `<div>
-    <input type="text" id="edit-name-${id}" value="${escapeHtml(name)}" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white mb-2" style="color:white;">
-    <div class="mb-2"><textarea id="edit-note-${id}" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" style="color:white;">${escapeHtml(note || '')}</textarea></div>
+    <input type="text" id="edit-name-${id}" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white mb-2" style="color:white;" value="${escapeHtml(lib.name)}" />
+    <div class="mb-2"><textarea id="edit-note-${id}" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" style="color:white;">${escapeHtml(lib.note || '')}</textarea></div>
     <div style="display:flex; gap:8px;">
       <button onclick="saveEditLib(${id})" class="px-4 bg-indigo-600 text-white rounded-lg text-sm">Save</button>
       <button onclick="render()" class="px-4 bg-gray-700 text-white rounded-lg text-sm">Cancel</button>
     </div>
   </div>`;
-  document.getElementById(`edit-name-${id}`).focus();
+  // focus name input for convenience
+  const nm = document.getElementById(`edit-name-${id}`);
+  if (nm) nm.focus();
 }
 
 function saveEditLib(id) {
-  const name = document.getElementById(`edit-name-${id}`).value;
-  const note = document.getElementById(`edit-note-${id}`).value;
+  const nameEl = document.getElementById(`edit-name-${id}`);
+  const noteEl = document.getElementById(`edit-note-${id}`);
+  const name = nameEl ? nameEl.value : '';
+  const note = noteEl ? noteEl.value : '';
   updateLibraryTask(id, name, note);
 }
-
 /* ---------- Adding library task into current loop (duration chosen here) ---------- */
 
 function showAddToLoopMenu(libTaskId) {
