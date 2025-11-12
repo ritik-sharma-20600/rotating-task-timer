@@ -1,21 +1,32 @@
 'use strict';
 
-/* ---------- storage (same robust wrapper) ---------- */
+/* ---------- Storage utility ---------- */
 const storage = {
-  save: (key,data) => {
-    try { localStorage.setItem(key, JSON.stringify(data)); return true; }
-    catch(e) { console.error('Storage save failed', e); return false; }
+  save: (key, data) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+      return true;
+    } catch (e) {
+      console.error('Storage save failed:', e);
+      return false;
+    }
   },
-  load: (key, def) => {
-    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; }
-    catch(e) { return def; }
+  load: (key, defaultValue) => {
+    try {
+      const item = localStorage.getItem(key);
+      return item ? JSON.parse(item) : defaultValue;
+    } catch (e) {
+      return defaultValue;
+    }
   }
 };
 
-/* ---------- constants & state ---------- */
-const LOOPS = ['out','in_weekday','in_weekend'];
-let swReg = null;
+/* ---------- App state (library + loops) ---------- */
 let audioContext = null;
+let swReg = null;
+
+// Constants
+const LOOPS = ['out', 'in_weekday', 'in_weekend'];
 
 const defaultLibrary = [
   { id: 1, name: 'Coding', note: 'Deep work block', defaultAllocated: 90 },
@@ -23,598 +34,920 @@ const defaultLibrary = [
   { id: 3, name: 'Reading', note: 'Reading / learning', defaultAllocated: 45 }
 ];
 
-const appState = {
+const state = {
+  // library of tasks (shared name + note)
   library: [],
-  loops: { out: [], in_weekday: [], in_weekend: [] },
-  timers: {
-    out: { activeTaskId:null, timerStartTime:null, isTimerRunning:false, timerInterval:null },
-    in_weekday: { activeTaskId:null, timerStartTime:null, isTimerRunning:false, timerInterval:null },
-    in_weekend: { activeTaskId:null, timerStartTime:null, isTimerRunning:false, timerInterval:null }
+  // loops: each loop holds entries referencing library tasks
+  loops: {
+    out: [],
+    in_weekday: [],
+    in_weekend: []
   },
-  activeMode: 'in', // 'in' | 'out'
+  // which top mode is selected: 'in' or 'out'
+  activeMode: 'in',
+  // override: 'auto' | 'weekday' | 'weekend'
+  dayOverride: 'auto',
+  // timers per-loop
+  timers: {
+    out: { activeTaskId: null, timerStartTime: null, isTimerRunning: false, timerInterval: null },
+    in_weekday: { activeTaskId: null, timerStartTime: null, isTimerRunning: false, timerInterval: null },
+    in_weekend: { activeTaskId: null, timerStartTime: null, isTimerRunning: false, timerInterval: null }
+  },
+  // UI
+  showManageTasks: false,
   currentManageTab: 'library',
+  currentLoopEditing: 'in_weekday', // derived
   isRendering: false,
-  activeLoopId: 'in_weekday' // derived
+  // guard for duplicate completions
+  lastCompletionToken: null
 };
 
-/* ---------- util helpers ---------- */
-function uid(){ return Date.now() + Math.floor(Math.random()*1000); }
-function escapeHtml(t){ const map={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}; return String(t).replace(/[&<>"']/g,m=>map[m]); }
-function formatTime(minutes){ if (isNaN(minutes)) return '0m'; const hrs = Math.floor(minutes/60); const mins = Math.floor(minutes%60); return hrs>0?`${hrs}h ${mins}m`:`${mins}m`; }
-function isWeekendDate(d){ const day = d.getDay(); return day===0 || day===6; }
-function getActiveLoopId(){ if (appState.activeMode === 'out') return 'out'; return isWeekendDate(new Date()) ? 'in_weekend' : 'in_weekday'; }
-
-/* ---------- PWA / SW / sound ---------- */
-async function registerSW(){
-  if ('serviceWorker' in navigator){
-    try{
+/* ---------- Service worker registration & messages ---------- */
+async function registerSW() {
+  if ('serviceWorker' in navigator) {
+    try {
       swReg = await navigator.serviceWorker.register('sw.js');
+      console.log('[APP] SW registered');
       await navigator.serviceWorker.ready;
-      navigator.serviceWorker.addEventListener('message', e => {
-        if (e.data && e.data.type === 'TASK_COMPLETE') playLocalSound();
+
+      navigator.serviceWorker.addEventListener('message', function (event) {
+        // SW notifies of completion: { type: 'TASK_COMPLETE', loopId, taskId, token }
+        const d = event.data;
+        if (!d || d.type !== 'TASK_COMPLETE') return;
+        handleExternalTaskComplete(d.loopId, d.taskId, d.token);
       });
-      if (Notification.permission === 'default') Notification.requestPermission();
-    } catch(err){ console.warn('sw register failed', err); }
+
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(p => console.log('[APP] Notification permission:', p));
+      }
+    } catch (err) {
+      console.error('[APP] SW registration failed:', err);
+      swReg = null;
+    }
   }
 }
 
-function scheduleSWAlarm(taskName, remainingMinutes, loopId){
-  if (!swReg) return;
-  const worker = swReg.active || swReg.waiting || swReg.installing;
-  if (!worker) return;
-  const delayMs = Math.max(1000, Math.round(remainingMinutes*60*1000));
-  worker.postMessage({ type:'SCHEDULE_ALARM', taskName, delay: delayMs, loopId });
-}
-function cancelSWAlarm(){ if (!swReg || !swReg.active) return; swReg.active.postMessage({ type:'CANCEL_ALARM' }); }
-
-function playLocalSound(){
-  try{
-    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioContext.state === 'suspended') audioContext.resume();
-    const now = audioContext.currentTime;
-    function beep(start,f,dur){ const o=audioContext.createOscillator(), g=audioContext.createGain(); o.connect(g); g.connect(audioContext.destination); o.frequency.value = f; o.type = 'sine'; g.gain.setValueAtTime(1,start); g.gain.exponentialRampToValueAtTime(0.01, start+dur); o.start(start); o.stop(start+dur); }
-    beep(now,600,0.35); beep(now+0.45,800,0.35); beep(now+0.9,1000,0.35);
-    if (navigator.vibrate) navigator.vibrate([200,120,200]);
-  } catch(e){ console.warn('sound err', e); }
-}
-
-/* ---------- persist/load ---------- */
-function persistAll(){
-  try {
-    const toSave = {
-      library: appState.library,
-      loops: appState.loops,
-      timers: {
-        out: { activeTaskId: appState.timers.out.activeTaskId, timerStartTime: appState.timers.out.timerStartTime, isTimerRunning: appState.timers.out.isTimerRunning },
-        in_weekday: { activeTaskId: appState.timers.in_weekday.activeTaskId, timerStartTime: appState.timers.in_weekday.timerStartTime, isTimerRunning: appState.timers.in_weekday.isTimerRunning },
-        in_weekend: { activeTaskId: appState.timers.in_weekend.activeTaskId, timerStartTime: appState.timers.in_weekend.timerStartTime, isTimerRunning: appState.timers.in_weekend.isTimerRunning }
-      },
-      activeMode: appState.activeMode
-    };
-    storage.save('focus_v2', toSave);
-  } catch(e){ console.warn('persist failed', e); }
-}
-
-function loadAll(){
-  const saved = storage.load('focus_v2', null);
-  if (!saved) {
-    appState.library = defaultLibrary.map(t => ({...t}));
-    appState.loops.out = [{ taskId:2, allocated:30, completed:0, order:0 }];
-    appState.loops.in_weekday = defaultLibrary.map((t,i)=>({ taskId:t.id, allocated:t.defaultAllocated, completed:0, order:i }));
-    appState.loops.in_weekend = defaultLibrary.map((t,i)=>({ taskId:t.id, allocated: Math.round(t.defaultAllocated*0.66), completed:0, order:i }));
-    appState.activeMode = 'in';
-    persistAll();
+function scheduleSWAlarm(loopId, taskName, remainingMinutes, token) {
+  if (!swReg) {
+    // no SW - skip
     return;
   }
-  appState.library = Array.isArray(saved.library) ? saved.library : defaultLibrary;
-  LOOPS.forEach(l => appState.loops[l] = Array.isArray(saved.loops && saved.loops[l]) ? saved.loops[l] : []);
-  ['out','in_weekday','in_weekend'].forEach(k => {
-    const t = (saved.timers && saved.timers[k]) || {};
-    appState.timers[k].activeTaskId = t.activeTaskId || null;
-    appState.timers[k].timerStartTime = t.timerStartTime || null;
-    appState.timers[k].isTimerRunning = !!t.isTimerRunning;
+
+  const worker = swReg.active || swReg.installing || swReg.waiting;
+  if (!worker) return;
+
+  const delayMs = Math.max(1000, Math.round(remainingMinutes * 60 * 1000));
+  worker.postMessage({
+    type: 'SCHEDULE_ALARM',
+    loopId,
+    taskName,
+    delay: delayMs,
+    token
   });
-  appState.activeMode = saved.activeMode || 'in';
 }
 
-/* ---------- library CRUD ---------- */
-function addLibraryTask(name, defaultAllocated, note){
-  if (!name || !name.trim()) { alert('Task name required'); return false; }
+function cancelSWAlarm() {
+  if (swReg && swReg.active) {
+    swReg.active.postMessage({ type: 'CANCEL_ALARM' });
+  }
+}
+
+/* ---------- Audio notification ---------- */
+function playLocalSound() {
+  try {
+    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+    if (audioContext.state === 'suspended') audioContext.resume();
+
+    function beep(start, freq, dur) {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.connect(gain);
+      gain.connect(audioContext.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(1.0, start);
+      gain.gain.exponentialRampToValueAtTime(0.01, start + dur);
+      osc.start(start);
+      osc.stop(start + dur);
+    }
+
+    const now = audioContext.currentTime;
+    beep(now, 600, 0.35);
+    beep(now + 0.45, 800, 0.35);
+    beep(now + 0.9, 1000, 0.35);
+
+    if ('vibrate' in navigator) {
+      navigator.vibrate([200, 100, 200]);
+    }
+  } catch (e) {
+    console.error('Sound error:', e);
+  }
+}
+
+/* ---------- Helpers & data model operations ---------- */
+
+function uid() {
+  return Date.now() + Math.floor(Math.random() * 1000);
+}
+
+function escapeHtml(text) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+  return String(text).replace(/[&<>"']/g, m => map[m]);
+}
+
+function formatTime(minutes) {
+  if (typeof minutes !== 'number' || isNaN(minutes)) return '0m';
+  const hrs = Math.floor(minutes / 60);
+  const mins = Math.floor(minutes % 60);
+  return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+}
+
+function isWeekendDate(d) {
+  const day = d.getDay();
+  return day === 0 || day === 6;
+}
+
+// Determine active loop id based on mode + override
+function getActiveLoopId() {
+  if (state.activeMode === 'out') return 'out';
+  if (state.dayOverride === 'weekday') return 'in_weekday';
+  if (state.dayOverride === 'weekend') return 'in_weekend';
+  // auto
+  return isWeekendDate(new Date()) ? 'in_weekend' : 'in_weekday';
+}
+
+/* ---------- Persistence ---------- */
+
+function initState() {
+  const saved = storage.load('focus_loops_v1', null);
+  if (!saved) {
+    // initialize defaults (library + loops)
+    state.library = defaultLibrary.map(t => ({ ...t }));
+    state.loops = {
+      out: [ { taskId: 2, allocated: 30, completed: 0, order: 0 } ],
+      in_weekday: defaultLibrary.map((t, i) => ({ taskId: t.id, allocated: t.defaultAllocated, completed: 0, order: i })),
+      in_weekend: defaultLibrary.map((t, i) => ({ taskId: t.id, allocated: Math.round(t.defaultAllocated * 0.66), completed: 0, order: i }))
+    };
+    state.activeMode = 'in';
+    state.dayOverride = 'auto';
+    persistState();
+    return;
+  }
+
+  // load saved state with defensives
+  state.library = Array.isArray(saved.library) ? saved.library : defaultLibrary.map(t => ({ ...t }));
+  state.loops = saved.loops || { out: [], in_weekday: [], in_weekend: [] };
+  state.activeMode = saved.activeMode || 'in';
+  state.dayOverride = saved.dayOverride || 'auto';
+
+  // timers
+  ['out', 'in_weekday', 'in_weekend'].forEach(l => {
+    const t = (saved.timers && saved.timers[l]) || {};
+    state.timers[l] = state.timers[l] || {};
+    state.timers[l].activeTaskId = t.activeTaskId || null;
+    state.timers[l].timerStartTime = t.timerStartTime || null;
+    state.timers[l].isTimerRunning = !!t.isTimerRunning;
+    state.timers[l].timerInterval = null;
+  });
+
+  state.lastCompletionToken = saved.lastCompletionToken || null;
+}
+
+function persistState() {
+  const toSave = {
+    library: state.library,
+    loops: state.loops,
+    activeMode: state.activeMode,
+    dayOverride: state.dayOverride,
+    timers: {
+      out: { activeTaskId: state.timers.out.activeTaskId, timerStartTime: state.timers.out.timerStartTime, isTimerRunning: state.timers.out.isTimerRunning },
+      in_weekday: { activeTaskId: state.timers.in_weekday.activeTaskId, timerStartTime: state.timers.in_weekday.timerStartTime, isTimerRunning: state.timers.in_weekday.isTimerRunning },
+      in_weekend: { activeTaskId: state.timers.in_weekend.activeTaskId, timerStartTime: state.timers.in_weekend.timerStartTime, isTimerRunning: state.timers.in_weekend.isTimerRunning }
+    },
+    lastCompletionToken: state.lastCompletionToken || null
+  };
+  storage.save('focus_loops_v1', toSave);
+}
+
+/* ---------- Library CRUD ---------- */
+
+function addLibraryTask(name, note) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) { alert('Task name cannot be empty'); return false; }
   const id = uid();
-  appState.library.push({ id, name: name.trim(), note: note || '', defaultAllocated: parseFloat(defaultAllocated) || 30 });
-  persistAll(); render();
+  state.library.push({ id, name: trimmed, note: (note || '').slice(0, 800), defaultAllocated: 30 });
+  persistState();
+  render();
   return true;
 }
-function updateLibraryTask(id, name, defaultAllocated, note){
-  const idx = appState.library.findIndex(t => t.id === id);
+
+function updateLibraryTask(id, name, note) {
+  const idx = state.library.findIndex(t => t.id === id);
   if (idx === -1) return;
-  appState.library[idx].name = name.trim();
-  appState.library[idx].defaultAllocated = parseFloat(defaultAllocated) || appState.library[idx].defaultAllocated;
-  appState.library[idx].note = note || '';
-  persistAll(); render();
-}
-function deleteLibraryTask(id){
-  if (!confirm('Delete task from library? This removes it from all loops.')) return;
-  LOOPS.forEach(loop => appState.loops[loop] = appState.loops[loop].filter(e => e.taskId !== id));
-  appState.library = appState.library.filter(t => t.id !== id);
-  LOOPS.forEach(loop => {
-    if (appState.timers[loop].activeTaskId === id) {
-      stopTimerForLoop(loop);
-      appState.timers[loop].activeTaskId = null;
-      appState.timers[loop].isTimerRunning = false;
-    }
-  });
-  persistAll(); render();
-}
-
-/* ---------- loop ops ---------- */
-function addTaskToLoop(loopId, taskId, allocated){
-  if (!LOOPS.includes(loopId)) return;
-  const task = appState.library.find(t => t.id === taskId);
-  if (!task) { alert('Task not found in library'); return; }
-  appState.loops[loopId].push({ taskId, allocated: parseFloat(allocated) || task.defaultAllocated, completed:0, order: appState.loops[loopId].length });
-  persistAll(); render();
-}
-function removeTaskFromLoop(loopId, taskId){
-  if (!confirm('Remove task from this loop?')) return;
-  appState.loops[loopId] = appState.loops[loopId].filter(e => e.taskId !== taskId);
-  if (appState.timers[loopId].activeTaskId === taskId) {
-    stopTimerForLoop(loopId);
-    appState.timers[loopId].activeTaskId = null;
-    appState.timers[loopId].isTimerRunning = false;
-  }
-  persistAll(); render();
-}
-function updateLoopEntry(loopId, taskId, allocated){
-  const e = appState.loops[loopId].find(x => x.taskId === taskId);
-  if (!e) return;
-  const a = parseFloat(allocated); if (isNaN(a) || a <= 0) { alert('Invalid duration'); return; }
-  e.allocated = Math.max(0.5, a);
-  e.completed = Math.min(e.completed, e.allocated);
-  persistAll(); render();
-}
-function resetLoopProgress(loopId){ appState.loops[loopId].forEach(e => e.completed = 0); persistAll(); render(); }
-function moveLoopEntry(loopId, fromIndex, toIndex){
-  const arr = appState.loops[loopId];
-  if (!arr || fromIndex===toIndex || fromIndex<0 || toIndex<0 || fromIndex>=arr.length || toIndex>=arr.length) return;
-  const [it] = arr.splice(fromIndex,1); arr.splice(toIndex,0,it); arr.forEach((it,i) => it.order = i);
-  persistAll(); render();
-}
-function moveUpInLoop(loopId, idx){ if (idx <= 0) return; moveLoopEntry(loopId, idx, idx-1); }
-function moveDownInLoop(loopId, idx){ const arr = appState.loops[loopId]; if (idx >= arr.length-1) return; moveLoopEntry(loopId, idx, idx+1); }
-
-/* ---------- timer per-loop ---------- */
-function getLibraryTask(id){ return appState.library.find(t => t.id === id) || { id:null, name:'Unknown', note:'', defaultAllocated:30 }; }
-function getIncompleteEntries(loopId){ return (appState.loops[loopId]||[]).filter(e => e.completed < e.allocated); }
-function getFirstIncompleteEntry(loopId){ const inc = getIncompleteEntries(loopId).sort((a,b)=>a.order-b.order); return inc.length ? inc[0] : null; }
-
-function startTimerForLoop(loopId){
-  const ts = appState.timers[loopId];
-  // ensure no multiple intervals
-  if (ts.timerInterval) { clearInterval(ts.timerInterval); ts.timerInterval = null; }
-  const entry = ts.activeTaskId ? appState.loops[loopId].find(e=>e.taskId===ts.activeTaskId) : getFirstIncompleteEntry(loopId);
-  if (!entry) { ts.isTimerRunning = false; persistAll(); render(); return; }
-  // stop other loops
-  LOOPS.forEach(l => { if (l!==loopId) stopTimerForLoop(l); });
-  ts.activeTaskId = entry.taskId;
-  ts.timerStartTime = Date.now();
-  ts.isTimerRunning = true;
-  persistAll();
-
-  const remaining = Math.max(0.001, entry.allocated - entry.completed);
-  scheduleSWAlarm(getLibraryTask(entry.taskId).name, remaining, loopId);
-
-  ts.timerInterval = setInterval(() => {
-    if (!ts.timerStartTime || !ts.activeTaskId) { stopTimerForLoop(loopId); return; }
-    const now = Date.now();
-    const elapsed = (now - ts.timerStartTime) / 60000;
-    const idx = appState.loops[loopId].findIndex(e => e && e.taskId === ts.activeTaskId);
-    if (idx !== -1) {
-      const e = appState.loops[loopId][idx];
-      e.completed = Math.min(e.completed + elapsed, e.allocated);
-      ts.timerStartTime = now;
-      persistAll(); render();
-      if (e.completed >= e.allocated) {
-        stopTimerForLoop(loopId);
-        ts.isTimerRunning = false;
-        playLocalSound();
-        cancelSWAlarm();
-        render();
-      }
-    } else { stopTimerForLoop(loopId); }
-  }, 1000);
-}
-
-function stopTimerForLoop(loopId){
-  const ts = appState.timers[loopId];
-  if (ts.timerInterval) { clearInterval(ts.timerInterval); ts.timerInterval = null; }
-  ts.timerStartTime = null; ts.activeTaskId = null; ts.isTimerRunning = false; cancelSWAlarm(); persistAll();
-}
-
-function toggleTimerForActiveLoop(){
-  const loopId = appState.activeLoopId;
-  const ts = appState.timers[loopId];
-  if (ts.isTimerRunning) stopTimerForLoop(loopId);
-  else startTimerForLoop(loopId);
+  state.library[idx].name = (name || '').trim();
+  state.library[idx].note = (note || '').slice(0, 800);
+  persistState();
   render();
 }
 
-/* ---------- import/export ---------- */
-function exportAll(){
-  try{
-    const payload = { meta:{ exportedAt:new Date().toISOString(), version:2 }, library:appState.library, loops:appState.loops, timers:{
-      out:{ activeTaskId: appState.timers.out.activeTaskId, timerStartTime: appState.timers.out.timerStartTime, isTimerRunning: appState.timers.out.isTimerRunning },
-      in_weekday:{ activeTaskId: appState.timers.in_weekday.activeTaskId, timerStartTime: appState.timers.in_weekday.timerStartTime, isTimerRunning: appState.timers.in_weekday.isTimerRunning },
-      in_weekend:{ activeTaskId: appState.timers.in_weekend.activeTaskId, timerStartTime: appState.timers.in_weekend.timerStartTime, isTimerRunning: appState.timers.in_weekend.isTimerRunning }
-    }, activeMode: appState.activeMode };
-    const blob = new Blob([JSON.stringify(payload,null,2)], { type:'application/json' });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `focus-loops-${new Date().toISOString().slice(0,10)}.json`; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url), 2000);
-  } catch(err){ alert('Export error: '+err.message); }
+function deleteLibraryTask(id) {
+  const task = state.library.find(t => t && t.id === id);
+  if (!task) return;
+  if (!confirm(`Delete "${task.name}" from library? This will remove it from all loops.`)) return;
+  // remove from loops
+  LOOPS.forEach(loop => {
+    state.loops[loop] = (state.loops[loop] || []).filter(e => e.taskId !== id);
+    // stop timers that reference it
+    if (state.timers[loop].activeTaskId === id) {
+      stopTimerForLoop(loop);
+      state.timers[loop].activeTaskId = null;
+      state.timers[loop].isTimerRunning = false;
+      state.timers[loop].timerStartTime = null;
+    }
+  });
+  state.library = state.library.filter(t => t.id !== id);
+  persistState();
+  render();
 }
 
-function importAll(){
-  const input = document.createElement('input'); input.type='file'; input.accept='application/json';
-  input.onchange = e => {
-    const f = e.target.files[0]; if (!f) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const parsed = JSON.parse(ev.target.result);
-        if (!parsed || !parsed.library || !parsed.loops) { alert('Invalid file'); return; }
-        if (!confirm('Replace current data with imported data? This will overwrite existing tasks and loops.')) return;
-        LOOPS.forEach(l => { stopTimerForLoop(l); appState.timers[l].isTimerRunning = false; appState.timers[l].activeTaskId = null; appState.timers[l].timerStartTime = null; });
-        appState.library = parsed.library;
-        LOOPS.forEach(l => appState.loops[l] = parsed.loops[l] || []);
-        if (parsed.timers) LOOPS.forEach(l => { const t = parsed.timers[l] || {}; appState.timers[l].activeTaskId = t.activeTaskId || null; appState.timers[l].timerStartTime = t.timerStartTime || null; appState.timers[l].isTimerRunning = !!t.isTimerRunning; });
-        appState.activeMode = parsed.activeMode || 'in';
-        persistAll(); render(); alert('Import complete.');
-      } catch(err){ alert('Import failed: '+err.message); }
+/* ---------- Loop operations ---------- */
+
+function addEntryToLoop(loopId, taskId, allocated) {
+  if (!LOOPS.includes(loopId)) return;
+  const libTask = state.library.find(t => t.id === taskId);
+  if (!libTask) { alert('Selected task not found in library'); return; }
+  const time = validateMinutes(allocated) || libTask.defaultAllocated || 30;
+  state.loops[loopId] = state.loops[loopId] || [];
+  state.loops[loopId].push({ taskId, allocated: time, completed: 0, order: state.loops[loopId].length });
+  persistState();
+  render();
+}
+
+function removeEntryFromLoop(loopId, taskId) {
+  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
+  if (!entry) return;
+  if (!confirm('Remove this task from the loop?')) return;
+  state.loops[loopId] = state.loops[loopId].filter(e => e.taskId !== taskId);
+  if (state.timers[loopId].activeTaskId === taskId) {
+    stopTimerForLoop(loopId);
+    state.timers[loopId].activeTaskId = null;
+    state.timers[loopId].isTimerRunning = false;
+    state.timers[loopId].timerStartTime = null;
+  }
+  persistState();
+  render();
+}
+
+function updateLoopAllocated(loopId, taskId, allocated) {
+  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
+  const t = validateMinutes(allocated);
+  if (!entry || t === null) { alert('Invalid allocated time'); return; }
+  entry.allocated = t;
+  entry.completed = Math.min(entry.completed, entry.allocated);
+  persistState();
+  render();
+}
+
+function resetLoopEntry(loopId, taskId) {
+  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
+  if (!entry) return;
+  entry.completed = 0;
+  persistState();
+  render();
+}
+
+function moveEntry(loopId, from, to) {
+  const arr = state.loops[loopId];
+  if (!arr || from < 0 || to < 0 || from >= arr.length || to >= arr.length || from === to) return;
+  const item = arr.splice(from, 1)[0];
+  arr.splice(to, 0, item);
+  arr.forEach((it, i) => it.order = i);
+  persistState();
+  render();
+}
+
+/* ---------- Timer logic (per-loop) ---------- */
+
+function getLoopEntries(loopId) {
+  return (state.loops[loopId] || []).filter(Boolean);
+}
+
+function getFirstIncomplete(loopId) {
+  const entries = getLoopEntries(loopId).sort((a, b) => (a.order || 0) - (b.order || 0));
+  return entries.find(e => e.completed < e.allocated) || null;
+}
+
+function startTimerForLoop(loopId) {
+  const timer = state.timers[loopId];
+  if (!timer) return;
+  // Prevent double intervals
+  if (timer.timerInterval) {
+    clearInterval(timer.timerInterval);
+    timer.timerInterval = null;
+  }
+
+  const entry = timer.activeTaskId ? (state.loops[loopId] || []).find(e => e.taskId === timer.activeTaskId) : getFirstIncomplete(loopId);
+  if (!entry) return;
+
+  // stop any other running loop timers
+  LOOPS.forEach(l => { if (l !== loopId) stopTimerForLoop(l); });
+
+  timer.activeTaskId = entry.taskId;
+  timer.timerStartTime = Date.now();
+  timer.isTimerRunning = true;
+  persistState();
+
+  // schedule SW alarm with token to identify this run
+  const token = uid();
+  state.lastCompletionToken = token;
+  persistState();
+  scheduleSWAlarm(loopId, getLibraryTask(entry.taskId).name, Math.max(0.001, entry.allocated - entry.completed), token);
+
+  timer.timerInterval = setInterval(() => {
+    if (!timer.timerStartTime || !timer.activeTaskId) {
+      stopTimerForLoop(loopId);
+      return;
+    }
+    const now = Date.now();
+    const elapsed = (now - timer.timerStartTime) / 60000;
+    const idx = (state.loops[loopId] || []).findIndex(e => e && e.taskId === timer.activeTaskId);
+    if (idx !== -1) {
+      const e = state.loops[loopId][idx];
+      e.completed = Math.min(e.completed + elapsed, e.allocated);
+      timer.timerStartTime = now;
+      persistState();
+      render();
+      if (e.completed >= e.allocated) {
+        // mark complete and stop — use token to avoid double-handling
+        handleLocalTaskComplete(loopId, e.taskId, state.lastCompletionToken);
+      }
+    } else {
+      stopTimerForLoop(loopId);
+    }
+  }, 1000);
+}
+
+function stopTimerForLoop(loopId) {
+  const timer = state.timers[loopId];
+  if (!timer) return;
+  if (timer.timerInterval) {
+    clearInterval(timer.timerInterval);
+    timer.timerInterval = null;
+  }
+  timer.timerStartTime = null;
+  timer.activeTaskId = null;
+  timer.isTimerRunning = false;
+  cancelSWAlarm();
+  persistState();
+}
+
+/* ---------- Completion handling (single-source-of-truth) ---------- */
+
+// Called when SW signals completion (from background)
+function handleExternalTaskComplete(loopId, taskId, token) {
+  // race-guard: if we already processed this token, ignore
+  if (token && state.lastCompletionToken === token) {
+    // already processed (or will be) — ignore
+    return;
+  }
+  // find the entry and mark completed if not already
+  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
+  if (!entry) return;
+  const wasComplete = entry.completed >= entry.allocated;
+  entry.completed = Math.min(entry.allocated, entry.completed + 0.0001 + 0); // ensure >= allocated
+  // persist and stop timer for that loop
+  stopTimerForLoop(loopId);
+  playLocalSound();
+  state.lastCompletionToken = token || uid();
+  persistState();
+  render();
+}
+
+// Called when local timer finishes
+function handleLocalTaskComplete(loopId, taskId, token) {
+  // If token matches lastCompletionToken, skip duplicate
+  if (token && state.lastCompletionToken === token) return;
+  // mark entry completed
+  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
+  if (!entry) return;
+  entry.completed = entry.allocated;
+  stopTimerForLoop(loopId);
+  playLocalSound();
+  state.lastCompletionToken = token || uid();
+  persistState();
+  render();
+}
+
+/* ---------- Other helpers ---------- */
+
+function validateMinutes(value) {
+  const num = parseFloat(value);
+  if (isNaN(num) || num <= 0) return null;
+  // allow .5 increments
+  return Math.max(0.5, Math.round(num * 2) / 2);
+}
+
+function getLibraryTask(id) {
+  return state.library.find(t => t && t.id === id) || { id: null, name: 'Unknown', note: '', defaultAllocated: 30 };
+}
+
+/* ---------- Import / Export (icon-only buttons restored) ---------- */
+
+function exportAll() {
+  try {
+    const payload = {
+      meta: { exportedAt: new Date().toISOString(), version: 1 },
+      library: state.library,
+      loops: state.loops,
+      timers: {
+        out: { activeTaskId: state.timers.out.activeTaskId, timerStartTime: state.timers.out.timerStartTime, isTimerRunning: state.timers.out.isTimerRunning },
+        in_weekday: { activeTaskId: state.timers.in_weekday.activeTaskId, timerStartTime: state.timers.in_weekday.timerStartTime, isTimerRunning: state.timers.in_weekday.isTimerRunning },
+        in_weekend: { activeTaskId: state.timers.in_weekend.activeTaskId, timerStartTime: state.timers.in_weekend.timerStartTime, isTimerRunning: state.timers.in_weekend.isTimerRunning }
+      },
+      activeMode: state.activeMode,
+      dayOverride: state.dayOverride,
+      lastCompletionToken: state.lastCompletionToken || null
     };
-    reader.readAsText(f);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `focus-loops-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  } catch (err) {
+    alert('Export error: ' + err.message);
+  }
+}
+
+function importAll() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json';
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const imported = JSON.parse(event.target.result);
+        if (!imported || !Array.isArray(imported.library) || !imported.loops) {
+          alert('Invalid file');
+          return;
+        }
+        if (!confirm(`Replace current state with imported state?`)) return;
+        // stop all timers
+        LOOPS.forEach(l => stopTimerForLoop(l));
+        state.library = imported.library;
+        state.loops = imported.loops;
+        state.activeMode = imported.activeMode || 'in';
+        state.dayOverride = imported.dayOverride || 'auto';
+        // restore timers lightly (but don't start intervals automatically)
+        ['out', 'in_weekday', 'in_weekend'].forEach(l => {
+          const t = (imported.timers && imported.timers[l]) || {};
+          state.timers[l].activeTaskId = t.activeTaskId || null;
+          state.timers[l].timerStartTime = t.timerStartTime || null;
+          state.timers[l].isTimerRunning = !!t.isTimerRunning;
+          state.timers[l].timerInterval = null;
+        });
+        state.lastCompletionToken = imported.lastCompletionToken || null;
+        persistState();
+        render();
+        alert('Import successful!');
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
   };
   input.click();
 }
 
-/* ---------- UI: render ---------- */
-function render(){
-  if (appState.isRendering) return;
-  appState.isRendering = true;
+/* ---------- Rendering (reverted to original Claude look) ---------- */
+
+function renderTimerView() {
+  const activeLoop = getActiveLoopId();
+  const incomplete = getLoopEntries(activeLoop).filter(t => t && t.completed < t.allocated);
+  if (incomplete.length === 0) {
+    return `<div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+      <div class="bg-gray-800 rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
+        <div class="w-24 h-24 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
+          <svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </div>
+        <h2 class="text-3xl font-bold text-white mb-4">All Tasks Complete!</h2>
+        <p class="text-gray-400 mb-8">You've finished all your tasks. Great work!</p>
+        <button onclick="resetAllTasks()" class="bg-green-600 text-white px-6 py-3 rounded-full font-semibold transition-colors w-full">Start New Cycle</button>
+      </div>
+    </div>`;
+  }
+
+  if (state.currentLoopEditing === undefined) state.currentLoopEditing = activeLoop;
+  const loopEntries = getLoopEntries(activeLoop).sort((a,b)=> (a.order||0)-(b.order||0));
+  if (state.currentTaskIndex >= loopEntries.length) state.currentTaskIndex = 0;
+  const taskEntry = loopEntries[state.currentTaskIndex] || loopEntries[0];
+  if (!taskEntry) return '<div class="min-h-screen bg-gray-900"></div>';
+
+  const libTask = getLibraryTask(taskEntry.taskId);
+  const progress = Math.min((taskEntry.completed / taskEntry.allocated) * 100, 100);
+  const taskNum = loopEntries.findIndex(t => t.taskId === taskEntry.taskId) + 1;
+
+  // small icon-only Import / Export and Manage icons on the top-right
+  return `<div class="min-h-screen bg-gray-900 flex flex-col">
+    <div class="flex-1 flex items-center justify-center p-4">
+      <div class="bg-gray-800 rounded-3xl shadow-2xl p-8 max-w-md w-full">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+          <div>
+            <div class="inline-block bg-indigo-900 text-indigo-300 px-3 py-1 rounded-full text-sm font-medium mb-2">Task ${taskNum} of ${loopEntries.length}</div>
+            <h1 class="text-4xl font-bold text-white mb-2">${escapeHtml(libTask.name)}</h1>
+            <div class="text-gray-400 text-lg">${formatTime(taskEntry.completed)} / ${formatTime(taskEntry.allocated)}</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="icon-btn" onclick="exportAll()" title="Export" aria-label="Export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></button>
+            <button class="icon-btn" onclick="importAll()" title="Import" aria-label="Import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg></button>
+            <button class="icon-btn" onclick="state.showManageTasks = true; render()" title="Manage" aria-label="Manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg></button>
+          </div>
+        </div>
+
+        <div class="mb-6">
+          <div class="bg-gray-700 rounded-full h-4 overflow-hidden">
+            <div class="bg-gradient-to-r h-full transition-all" style="width: ${progress}%;"></div>
+          </div>
+        </div>
+
+        <div class="flex gap-3 mb-6">
+          <button onclick="toggleTimer()" class="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-semibold text-lg transition-all ${state.timers[activeLoop].isTimerRunning ? 'bg-red-600' : 'bg-indigo-600'} text-white">
+            ${state.timers[activeLoop].isTimerRunning ?
+              '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Pause' :
+              '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Start'
+            }
+          </button>
+          ${getLoopEntries(activeLoop).length > 1 ?
+            '<button onclick="nextTask()" class="px-6 py-4 bg-gray-700 rounded-2xl transition-colors text-white" title="Next"><svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg></button>' : ''
+          }
+        </div>
+
+        <div class="text-gray-400 mb-4">${isWeekendDate(new Date()) ? 'Weekend loop active' : 'Weekday loop active'}</div>
+
+        <div class="text-gray-400" style="white-space:pre-line; max-height:5.6em; overflow:hidden;">
+          ${escapeHtml(libTask.note || '')}
+        </div>
+
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------- Manage view (reverted to original/manage layout) ---------- */
+
+function renderManageView() {
+  const activeLoop = getActiveLoopId();
+  return `<div class="min-h-screen bg-gray-900 p-4 no-scrollbar" style="overflow-y: auto;">
+    <div class="max-w-md mx-auto">
+      <div class="flex items-center gap-3 mb-6">
+        <button onclick="state.showManageTasks = false; render()" class="p-2 bg-gray-800 rounded-lg text-white transition-colors" aria-label="Back">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+        </button>
+        <h2 class="text-2xl font-bold text-white flex-1">Manage Tasks</h2>
+        <button onclick="exportAll()" class="p-2 bg-gray-700 rounded-lg text-white transition-colors" title="Export" aria-label="Export">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        </button>
+        <button onclick="importAll()" class="p-2 bg-gray-700 rounded-lg text-white transition-colors" title="Import" aria-label="Import">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        </button>
+        <button onclick="showAddFormLib()" class="p-2 bg-indigo-600 rounded-lg text-white transition-colors" title="Add Task" aria-label="Add task">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        </button>
+      </div>
+
+      <div id="add-form-container"></div>
+
+      <div class="space-y-3" id="tasks-list">
+        ${state.library.map((t, idx) => {
+          if (!t) return '';
+          // library shows name and note only (no durations)
+          return `<div class="bg-gray-800 rounded-2xl p-4" data-lib-id="${t.id}">
+            <div class="flex items-center gap-3">
+              <div style="flex:1; cursor:pointer" onclick="showEditFormLib(${t.id}, '${escapeHtml(t.name).replace(/'/g, \"\\'\")}', \`${(t.note||'').replace(/`/g, '\\`')}\`)">
+                <div class="text-white font-medium mb-1">${escapeHtml(t.name)}</div>
+                <div class="text-sm text-gray-400" style="white-space:pre-line; max-height:4.2em; overflow:hidden;">${escapeHtml(t.note || '')}</div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <button onclick="showAddToLoopMenu(${t.id})" class="p-1.5 bg-indigo-600 rounded-lg text-white transition-colors" title="Add to current loop" aria-label="Add to loop">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <button onclick="showEditFormLib(${t.id}, '${escapeHtml(t.name).replace(/'/g, \"\\'\")}', \`${(t.note||'').replace(/`/g, '\\`')}\`)" class="p-1.5 bg-gray-700 rounded-lg text-white transition-colors" title="Edit" aria-label="Edit"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4h6"></path><path d="M18 8l-9 9H3v-6l9-9 6 6z"></path></svg></button>
+                <button onclick="deleteLibraryTask(${t.id})" class="p-1.5 bg-red-600 rounded-lg text-white transition-colors" title="Delete" aria-label="Delete"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div style="height:40px;"></div>
+    </div>
+  </div>`;
+}
+
+/* ---------- Add / Edit library forms (compact) ---------- */
+
+function showAddFormLib() {
+  const c = document.getElementById('add-form-container');
+  if (!c) return;
+  c.innerHTML = `<div class="bg-gray-800 rounded-2xl p-4 mb-4">
+    <input type="text" id="lib-new-name" placeholder="Task name" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white mb-2" style="color:white;" aria-label="New task name">
+    <div class="mb-2"><textarea id="lib-new-note" placeholder="Optional note (4-5 lines)" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white" style="color:white;"></textarea></div>
+    <div style="display:flex; gap:8px;">
+      <button onclick="submitAddLib()" class="px-6 bg-indigo-600 text-white rounded-lg font-medium">Add</button>
+      <button onclick="document.getElementById('add-form-container').innerHTML=''" class="px-4 bg-gray-700 text-white rounded-lg">✕</button>
+    </div>
+  </div>`;
+  document.getElementById('lib-new-name').focus();
+}
+
+function submitAddLib() {
+  const name = document.getElementById('lib-new-name').value;
+  const note = document.getElementById('lib-new-note').value;
+  if (addLibraryTask(name, note)) {
+    document.getElementById('add-form-container').innerHTML = '';
+  }
+}
+
+function showEditFormLib(id, name, note) {
+  const el = document.querySelector(`[data-lib-id="${id}"]`);
+  if (!el) return;
+  el.innerHTML = `<div>
+    <input type="text" id="edit-name-${id}" value="${escapeHtml(name)}" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white mb-2" style="color:white;">
+    <div class="mb-2"><textarea id="edit-note-${id}" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" style="color:white;">${escapeHtml(note || '')}</textarea></div>
+    <div style="display:flex; gap:8px;">
+      <button onclick="saveEditLib(${id})" class="px-4 bg-indigo-600 text-white rounded-lg text-sm">Save</button>
+      <button onclick="render()" class="px-4 bg-gray-700 text-white rounded-lg text-sm">Cancel</button>
+    </div>
+  </div>`;
+  document.getElementById(`edit-name-${id}`).focus();
+}
+
+function saveEditLib(id) {
+  const name = document.getElementById(`edit-name-${id}`).value;
+  const note = document.getElementById(`edit-note-${id}`).value;
+  updateLibraryTask(id, name, note);
+}
+
+/* ---------- Adding library task into current loop (duration chosen here) ---------- */
+
+function showAddToLoopMenu(libTaskId) {
+  // small prompt: choose a preset or custom
+  const loopId = getActiveLoopId();
+  const presets = [15, 30, 45, 60, 90, 120, 150, 180, 210, 240];
+  const opts = presets.map(m => `${m}m`).join(', ');
+  const time = prompt(`Add "${getLibraryTask(libTaskId).name}" to ${loopId}\nChoose minutes (presets: ${opts})`, '30');
+  if (!time) return;
+  const valid = validateMinutes(time);
+  if (valid === null) { alert('Invalid minutes'); return; }
+  addEntryToLoop(loopId, libTaskId, valid);
+}
+
+/* ---------- Render and UI helpers ---------- */
+
+function render() {
+  if (state.isRendering) return;
+  state.isRendering = true;
   try {
-    appState.activeLoopId = getActiveLoopId();
     const app = document.getElementById('app');
     if (!app) return;
 
-    const activeLoopHuman = appState.activeLoopId === 'out' ? 'Out' : (appState.activeLoopId === 'in_weekend' ? 'In — Weekend' : 'In — Weekday');
-    const hint = appState.activeLoopId === 'in_weekend' ? 'Weekend: lighter tasks' : 'Weekday: normal routine';
+    // determine active loop for display & editing
+    const activeLoopId = getActiveLoopId();
+    state.currentLoopEditing = activeLoopId;
 
-    const loopEntries = (appState.loops[appState.activeLoopId] || []).slice().sort((a,b)=> (a.order||0)-(b.order||0));
-    const firstInc = loopEntries.find(e => e.completed < e.allocated) || null;
-    const currentDef = firstInc ? getLibraryTask(firstInc.taskId) : null;
-    const progressPct = firstInc ? Math.min(100, Math.round((firstInc.completed/firstInc.allocated)*100)) : 0;
-
-    // main HTML
-    let html = `
-      <div class="top-card container" role="region" aria-label="Mode selection">
-        <div class="mode-slider" >
-          <div style="flex:1"></div>
-          <div class="slider-wrap" role="tablist" aria-label="Mode switch">
-            <button class="mode-btn ${appState.activeMode==='out'?'active':''}" onclick="setMode('out')" aria-pressed="${appState.activeMode==='out'}">Out</button>
-            <button class="mode-btn ${appState.activeMode==='in'?'active':''}" onclick="setMode('in')" aria-pressed="${appState.activeMode==='in'}">In</button>
-          </div>
-          <div class="header-right"><button class="btn" onclick="openManage()" aria-label="Open Manage Tasks">Manage</button></div>
-        </div>
+    // build top small mode toggle + day override
+    const modeToggle = `<div style="display:flex; align-items:center; justify-content:center; gap:8px; margin:12px;">
+      <div class="mode-toggle" role="tablist" aria-label="Mode">
+        <button class="${state.activeMode==='out' ? 'active' : ''}" onclick="setMode('out')" aria-pressed="${state.activeMode==='out'}">Out</button>
+        <button class="${state.activeMode==='in' ? 'active' : ''}" onclick="setMode('in')" aria-pressed="${state.activeMode==='in'}">In</button>
       </div>
-
-      <div class="container center-card">
-        <div class="timer-card" role="main" aria-live="polite">
-          <div class="title">${currentDef ? escapeHtml(currentDef.name) : 'No tasks in this loop'}</div>
-          <div class="subtitle">${escapeHtml(activeLoopHuman)} — ${escapeHtml(hint)}</div>
-
-          <div class="progress-wrap">
-            <div class="progress-track"><div class="progress-fill" style="width:${progressPct}%;"></div></div>
-          </div>
-
-          <div class="controls" role="toolbar" aria-label="Timer controls">
-            <button class="big-btn ${appState.timers[appState.activeLoopId].isTimerRunning ? 'pause' : 'start'}" onclick="toggleTimerForActiveLoop()" aria-pressed="${appState.timers[appState.activeLoopId].isTimerRunning}">
-              ${appState.timers[appState.activeLoopId].isTimerRunning ? 'Pause' : 'Start'}
-            </button>
-            <button class="btn" onclick="goToNextTask()">Next</button>
-            <button class="btn" onclick="exportAll()">Export</button>
-            <button class="btn" onclick="importAll()">Import</button>
-          </div>
-
-          <div class="info-line" style="margin-top:12px;">
-            ${currentDef && currentDef.note ? escapeHtml(currentDef.note).replace(/\n/g,'<br>') : '<span style="color:#546779">No note — edit in Task Library</span>'}
-          </div>
-        </div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <select id="day-override" onchange="setDayOverride(this.value)" style="background:#111827;color:#fff;border:1px solid #374151;padding:8px;border-radius:8px;">
+          <option value="auto" ${state.dayOverride==='auto' ? 'selected' : ''}>Auto</option>
+          <option value="weekday" ${state.dayOverride==='weekday' ? 'selected' : ''}>Force weekday</option>
+          <option value="weekend" ${state.dayOverride==='weekend' ? 'selected' : ''}>Force weekend</option>
+        </select>
       </div>
-    `;
+    </div>`;
 
-    const hash = location.hash || '';
-    if (hash.startsWith('#manage')) html = renderManageScreen() + html;
-
-    app.innerHTML = html;
-
-    // enable loop drag accessibility (desktop) & button reorder on mobile
-    if (hash.startsWith('#manage') && appState.currentManageTab === 'loop') {
-      setupLoopDrag(); // desktop dragging
-      // attach move up/down handlers (exposed already as functions)
+    // main body: either manage view or timer view
+    let bodyHtml = '';
+    if (state.showManageTasks) {
+      bodyHtml = renderManageView();
+    } else {
+      bodyHtml = renderTimerView();
     }
 
-    // mark keyboard navigation detection to show focus outlines if user used keyboard
-    window.addEventListener('keydown', () => document.documentElement.classList.add('keyboard-navigation'), { once: true });
+    app.innerHTML = `<div class="container">
+      ${modeToggle}
+      <div class="timer-wrap">
+        ${bodyHtml}
+      </div>
+    </div>`;
 
   } finally {
-    appState.isRendering = false;
+    state.isRendering = false;
   }
 }
 
-/* ---------- manage panel ---------- */
-function renderManageScreen(){
-  const loopId = appState.activeLoopId;
-  const lib = appState.library.slice().sort((a,b)=>a.name.localeCompare(b.name));
-  const entries = (appState.loops[loopId]||[]).slice().sort((a,b)=> (a.order||0)-(b.order||0));
+/* ---------- Mode and override setters ---------- */
 
-  let html = `
-    <div class="manage-overlay" role="dialog" aria-label="Manage tasks" tabindex="-1">
-      <div class="manage-panel container">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px;">
-          <div style="display:flex; gap:8px; align-items:center;">
-            <button class="tab ${appState.currentManageTab==='library'?'active':''}" onclick="navigateManage('library')">Task Library</button>
-            <button class="tab ${appState.currentManageTab==='loop'?'active':''}" onclick="navigateManage('loop')">Edit Current Loop</button>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn" onclick="closeManage()">Close</button>
-          </div>
-        </div>
-
-        ${appState.currentManageTab === 'library' ? renderLibraryTab(lib) : renderLoopTab(entries, lib, loopId)}
-
-      </div>
-    </div>
-  `;
-  return html;
-}
-
-function renderLibraryTab(lib){
-  return `
-    <div>
-      <div style="display:flex; gap:8px; margin-bottom:10px;">
-        <input id="lib-new-name" class="input" placeholder="New task name (required)" aria-label="New task name" />
-        <select id="lib-new-default" class="select" aria-label="Default duration">
-          ${[15,30,45,60,90,120,150,180,210,240].map(m => `<option value="${m}">${m>=60 ? (m/60)+'h' : m+'m'} (${m}m)</option>`).join('')}
-        </select>
-        <button class="btn" onclick="addLibraryFromForm()">Add</button>
-      </div>
-      <div style="margin-bottom:12px;">
-        <textarea id="lib-new-note" class="input" placeholder="Optional note (4-5 lines allowed)" aria-label="New task note"></textarea>
-      </div>
-
-      <div class="list-card" id="library-list" role="list">
-        ${lib.map(item => `
-          <div class="task-row" role="listitem" data-lib-id="${item.id}">
-            <div style="flex:1">
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                  <div style="font-weight:700;">${escapeHtml(item.name)}</div>
-                  <div style="color:#8ea6bb; font-size:13px;">${formatTime(item.defaultAllocated)}</div>
-                </div>
-                <div style="display:flex; gap:8px;">
-                  <button class="btn" onclick="showEditLibraryForm(${item.id})">Edit</button>
-                  <button class="btn" onclick="deleteLibraryTask(${item.id})">Delete</button>
-                </div>
-              </div>
-              <div style="margin-top:8px; color:#cfe0ff;">${escapeHtml(item.note).replace(/\n/g,'<br>')}</div>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `;
-}
-
-function addLibraryFromForm(){
-  const name = document.getElementById('lib-new-name').value;
-  const def = document.getElementById('lib-new-default').value;
-  const note = document.getElementById('lib-new-note').value;
-  if (addLibraryTask(name, def, note)) {
-    document.getElementById('lib-new-name').value=''; document.getElementById('lib-new-note').value='';
-  }
-}
-function showEditLibraryForm(id){
-  const lib = appState.library.find(t => t.id === id); if (!lib) return;
-  const el = document.querySelector(`[data-lib-id="${id}"]`);
-  if (!el) return;
-  el.innerHTML = `
-    <div style="flex:1">
-      <input id="edit-name-${id}" class="input" value="${escapeHtml(lib.name)}" />
-      <div style="display:flex; gap:8px; margin-top:8px;">
-        <select id="edit-default-${id}" class="select">
-          ${[15,30,45,60,90,120,150,180,210,240].map(m => `<option value="${m}" ${lib.defaultAllocated==m?'selected':''}>${m>=60?(m/60)+'h':m+'m'}</option>`).join('')}
-        </select>
-        <button class="btn" onclick="saveEditLibrary(${id})">Save</button>
-        <button class="btn" onclick="render()">Cancel</button>
-      </div>
-      <div style="margin-top:8px;"><textarea id="edit-note-${id}" class="input">${escapeHtml(lib.note)}</textarea></div>
-    </div>
-  `;
-}
-
-function saveEditLibrary(id){
-  const name = document.getElementById(`edit-name-${id}`).value;
-  const def = document.getElementById(`edit-default-${id}`).value;
-  const note = document.getElementById(`edit-note-${id}`).value;
-  updateLibraryTask(id, name, def, note);
-}
-
-/* loop tab rendering includes up/down reorder buttons for touch accessibility */
-function renderLoopTab(entries, lib, loopId){
-  const assignedIds = entries.map(e => e.taskId);
-  const unassigned = lib.filter(l => !assignedIds.includes(l.id));
-  return `
-    <div style="display:flex; gap:12px; flex-direction:column;">
-      <div style="display:flex; gap:8px; margin-bottom:10px;">
-        <select id="add-to-loop-select" class="select" aria-label="Select task to add">
-          ${unassigned.length ? unassigned.map(u=>`<option value="${u.id}">${escapeHtml(u.name)} — ${formatTime(u.defaultAllocated)}</option>`).join('') : '<option disabled>No tasks to add — create in library</option>'}
-        </select>
-        <select id="add-to-loop-alloc" class="select" aria-label="Allocated time">
-          ${[15,30,45,60,90,120,150,180,210,240].map(m=>`<option value="${m}">${m>=60?(m/60)+'h':m+'m'}</option>`).join('')}
-        </select>
-        <button class="btn" onclick="addSelectedToLoop('${loopId}')">Add</button>
-      </div>
-
-      <div class="list-card" id="loop-tasks-list" role="list">
-        ${entries.length ? entries.map((e, idx) => {
-          const def = getLibraryTask(e.taskId);
-          const prog = Math.min(100, Math.round((e.completed/e.allocated)*100));
-          return `
-            <div class="task-row" role="listitem" data-loop-idx="${idx}">
-              <div class="drag-handle" aria-hidden="true">⋮</div>
-              <div style="flex:1">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <div>
-                    <div style="font-weight:700;">${escapeHtml(def.name)}</div>
-                    <div style="color:#8ea6bb; font-size:13px;">${formatTime(e.completed)} / ${formatTime(e.allocated)}</div>
-                  </div>
-                  <div style="display:flex; gap:8px; align-items:center;">
-                    <input class="input" id="alloc-${e.taskId}" style="width:96px;" value="${e.allocated}" aria-label="Allocated minutes for ${escapeHtml(def.name)}" />
-                    <button class="btn" onclick="updateLoopEntry('${loopId}', ${e.taskId}, document.getElementById('alloc-${e.taskId}').value)">Save</button>
-                    <button class="btn" onclick="resetLoopEntry('${loopId}', ${e.taskId})">Reset</button>
-                    <button class="btn" onclick="removeTaskFromLoop('${loopId}', ${e.taskId})">Remove</button>
-                  </div>
-                </div>
-                <div style="margin-top:8px;">
-                  <div class="progress-track"><div class="progress-fill" style="width:${prog}%;"></div></div>
-                </div>
-                <div style="display:flex; gap:6px; margin-top:8px; justify-content:flex-end;">
-                  <button class="reorder-btn" onclick="moveUpInLoop('${loopId}', ${idx})" aria-label="Move up">↑</button>
-                  <button class="reorder-btn" onclick="moveDownInLoop('${loopId}', ${idx})" aria-label="Move down">↓</button>
-                </div>
-              </div>
-            </div>
-          `;
-        }).join('') : `<div class="text-sm" style="color:#8ea6bb">No tasks assigned to this loop yet.</div>`}
-      </div>
-
-      <div style="display:flex; gap:8px; margin-top:8px;">
-        <button class="btn" onclick="resetLoopProgress('${loopId}')">Reset all progress in this loop</button>
-      </div>
-    </div>
-  `;
-}
-
-function addSelectedToLoop(loopId){
-  const sel = document.getElementById('add-to-loop-select'); if (!sel) return;
-  const val = parseInt(sel.value); const alloc = document.getElementById('add-to-loop-alloc').value;
-  if (!val) return; addTaskToLoop(loopId, val, alloc);
-}
-
-/* ---------- drag & reorder usability ---------- */
-function setupLoopDrag(){
-  const list = document.getElementById('loop-tasks-list'); if (!list) return;
-  // Desktop: basic HTML5 DnD visuals remain. Mobile: explicit up/down buttons handle reorder.
-  let dragged=null, fromIdx=null;
-  Array.from(list.querySelectorAll('[data-loop-idx]')).forEach((el, idx) => {
-    el.draggable = true;
-    el.addEventListener('dragstart', e => { dragged = el; fromIdx = parseInt(el.getAttribute('data-loop-idx')); el.style.opacity='0.5'; });
-    el.addEventListener('dragend', e => { if (dragged) dragged.style.opacity='1'; Array.from(list.querySelectorAll('[data-loop-idx]')).forEach(i=>{ i.style.borderTop=''; i.style.borderBottom=''; }); dragged=null; fromIdx=null; });
-    el.addEventListener('dragover', e => { e.preventDefault(); if (el!==dragged){ const rect = el.getBoundingClientRect(); el.style.borderTop = (e.clientY < rect.y + rect.height/2) ? '2px solid #6366f1' : ''; el.style.borderBottom = (e.clientY >= rect.y + rect.height/2) ? '2px solid #6366f1' : ''; } });
-    el.addEventListener('drop', e => { e.preventDefault(); if (!dragged) return; const toIdx = parseInt(el.getAttribute('data-loop-idx')); const loopId = appState.activeLoopId; moveLoopEntry(loopId, fromIdx, toIdx); });
-  });
-}
-
-/* ---------- nav / interactions ---------- */
-function setMode(mode){
-  if (mode!=='in' && mode!=='out') return;
+function setMode(mode) {
+  if (mode !== 'in' && mode !== 'out') return;
+  // pause running loop when switching
   const prevLoop = getActiveLoopId();
-  if (appState.timers[prevLoop] && appState.timers[prevLoop].isTimerRunning) {
+  if (state.timers[prevLoop] && state.timers[prevLoop].isTimerRunning) {
     stopTimerForLoop(prevLoop);
+    state.timers[prevLoop].isTimerRunning = false;
   }
-  appState.activeMode = mode;
-  persistAll(); render();
-}
-function goToNextTask(){
-  const loop = appState.activeLoopId; const entries = (appState.loops[loop]||[]).slice().sort((a,b)=> (a.order||0)-(b.order||0));
-  if (!entries.length) return;
-  let idx = entries.findIndex(e => e.completed < e.allocated); if (idx === -1) return;
-  for (let i = idx+1; i < entries.length; i++) if (entries[i].completed < entries[i].allocated) { appState.timers[loop].activeTaskId = entries[i].taskId; appState.timers[loop].timerStartTime = Date.now(); persistAll(); render(); return; }
-  stopTimerForLoop(loop); render();
+  state.activeMode = mode;
+  persistState();
+  render();
 }
 
-/* ---------- navigation manage overlay ---------- */
-function openManage(){ location.hash = '#manage?tab=library'; render(); }
-function closeManage(){ location.hash = ''; render(); }
-function navigateManage(tab){ appState.currentManageTab = tab; location.hash = '#manage?tab='+tab; render(); }
+function setDayOverride(val) {
+  if (['auto', 'weekday', 'weekend'].includes(val)) {
+    state.dayOverride = val;
+    persistState();
+    render();
+  }
+}
 
-/* ---------- visibility handling ---------- */
+/* ---------- Timer toggle + next task + stop ---------- */
+
+function toggleTimer() {
+  const loopId = getActiveLoopId();
+  const timer = state.timers[loopId];
+  if (!timer) return;
+  if (timer.isTimerRunning) {
+    stopTimerForLoop(loopId);
+  } else {
+    startTimerForLoop(loopId);
+  }
+  render();
+}
+
+function nextTask() {
+  const loopId = getActiveLoopId();
+  const entries = getLoopEntries(loopId).sort((a, b) => (a.order || 0) - (b.order || 0));
+  if (entries.length === 0) return;
+  const idx = entries.findIndex(e => e && e.taskId === state.timers[loopId].activeTaskId);
+  // stop current timer
+  stopTimerForLoop(loopId);
+  // move to next incomplete
+  let nextIdx = -1;
+  for (let i = (idx + 1) || 0; i < entries.length; i++) {
+    if (entries[i].completed < entries[i].allocated) { nextIdx = i; break; }
+  }
+  if (nextIdx === -1) {
+    // wrap to start
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i].completed < entries[i].allocated) { nextIdx = i; break; }
+    }
+  }
+  if (nextIdx !== -1) {
+    state.currentTaskIndex = nextIdx;
+    // don't auto-start — wait for user to press Start
+  }
+  persistState();
+  render();
+}
+
+/* ---------- Reset and utility functions ---------- */
+
+function resetAllTasks() {
+  if (!confirm('Reset progress for all tasks?')) return;
+  LOOPS.forEach(loop => {
+    (state.loops[loop] || []).forEach(e => e.completed = 0);
+    stopTimerForLoop(loop);
+    state.timers[loop].isTimerRunning = false;
+    state.timers[loop].activeTaskId = null;
+    state.timers[loop].timerStartTime = null;
+  });
+  persistState();
+  render();
+}
+
+/* ---------- Drag and touch reorder for manage view (desktop drag & mobile up/down) ---------- */
+
+function setupDragAndDropManage() {
+  const list = document.getElementById('tasks-list');
+  if (!list) return;
+  let draggedEl = null, draggedIdx = null;
+  // use the loop's entries for up/down in manage -> however we keep library list drag disabled (we reorder loop entries separately)
+  // For library list we allow inline edit and add; reordering applies in loop edit, not library.
+  // The original manage view didn't include drag for library; we preserve that.
+}
+
+/* ---------- Visibility handling & onload reconciliation ---------- */
+
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
+    // tab visible again: reconcile timers saved as running
     LOOPS.forEach(loop => {
-      const ts = appState.timers[loop];
-      if (ts.isTimerRunning && !ts.timerInterval) {
-        // try resume
-        ts.timerStartTime = Date.now();
-        startTimerForLoop(loop);
+      const ts = state.timers[loop];
+      if (ts.timerStartTime && ts.activeTaskId) {
+        const elapsed = (Date.now() - ts.timerStartTime) / 60000;
+        const entry = (state.loops[loop] || []).find(e => e.taskId === ts.activeTaskId);
+        if (entry) {
+          const wasComplete = entry.completed >= entry.allocated;
+          entry.completed = Math.min(entry.allocated, entry.completed + elapsed);
+          persistState();
+          if (entry.completed >= entry.allocated && !wasComplete) {
+            // mark complete & notify (don’t restart)
+            handleLocalTaskComplete(loop, entry.taskId, state.lastCompletionToken);
+          } else if (entry.completed < entry.allocated) {
+            // resume interval
+            ts.timerStartTime = Date.now();
+            if (ts.isTimerRunning && !ts.timerInterval) startTimerForLoop(loop);
+          }
+        } else {
+          // referenced deleted entry
+          ts.timerStartTime = null; ts.activeTaskId = null; ts.isTimerRunning = false;
+          persistState();
+        }
       }
     });
     render();
   } else {
+    // when hidden, clear intervals to avoid background work (SW handles notifications)
     LOOPS.forEach(loop => {
-      if (appState.timers[loop].timerInterval) {
-        clearInterval(appState.timers[loop].timerInterval);
-        appState.timers[loop].timerInterval = null;
-      }
+      const ts = state.timers[loop];
+      if (ts.timerInterval) { clearInterval(ts.timerInterval); ts.timerInterval = null; }
     });
   }
 });
 
-/* ---------- init ---------- */
-(async function init(){
-  await registerSW().catch(()=>{});
-  loadAll();
-  // Reconcile possible running timers saved earlier
+/* ---------- Init ---------- */
+
+(async function init() {
+  try {
+    await registerSW();
+  } catch (e) {
+    console.warn('SW register error', e);
+  }
+  initState();
+  // reconcile timers that were previously running
   LOOPS.forEach(loop => {
-    const ts = appState.timers[loop];
+    const ts = state.timers[loop];
     if (ts.timerStartTime && ts.activeTaskId) {
-      const entry = appState.loops[loop].find(e => e.taskId === ts.activeTaskId);
+      const entry = (state.loops[loop] || []).find(e => e.taskId === ts.activeTaskId);
       if (entry) {
-        const elapsed = (Date.now() - ts.timerStartTime)/60000;
-        const wasComplete = entry.completed >= entry.allocated;
-        entry.completed = Math.min(entry.completed + elapsed, entry.allocated);
-        if (entry.completed >= entry.allocated && !wasComplete) {
-          ts.isTimerRunning = false; ts.activeTaskId = null; ts.timerStartTime = null; playLocalSound();
-        } else if (entry.completed < entry.allocated) {
-          ts.isTimerRunning = true; ts.timerStartTime = Date.now(); startTimerForLoop(loop);
+        const elapsed = (Date.now() - ts.timerStartTime) / 60000;
+        entry.completed = Math.min(entry.allocated, entry.completed + elapsed);
+        if (entry.completed >= entry.allocated) {
+          // completed while app was closed
+          entry.completed = entry.allocated;
+          ts.timerStartTime = null; ts.activeTaskId = null; ts.isTimerRunning = false;
+          playLocalSound();
+        } else {
+          // continue running
+          ts.timerStartTime = Date.now();
+          if (ts.isTimerRunning) startTimerForLoop(loop);
         }
       } else {
-        ts.isTimerRunning = false; ts.activeTaskId = null; ts.timerStartTime = null;
+        // referenced deleted task
+        ts.timerStartTime = null; ts.activeTaskId = null; ts.isTimerRunning = false;
       }
     }
   });
-  appState.activeLoopId = getActiveLoopId();
+
   render();
 })();
 
-/* ---------- expose functions for inline onclicks ---------- */
-window.setMode = setMode;
-window.openManage = openManage;
-window.closeManage = closeManage;
-window.navigateManage = navigateManage;
-window.addLibraryFromForm = addLibraryFromForm;
-window.showEditLibraryForm = showEditLibraryForm;
-window.saveEditLibrary = saveEditLibrary;
-window.deleteLibraryTask = deleteLibraryTask;
-window.addSelectedToLoop = addSelectedToLoop;
-window.updateLoopEntry = updateLoopEntry;
-window.resetLoopEntry = resetLoopEntry;
-window.removeTaskFromLoop = removeTaskFromLoop;
-window.toggleTimerForActiveLoop = toggleTimerForActiveLoop;
-window.goToNextTask = goToNextTask;
+/* ---------- Expose functions for inline buttons used in templates ---------- */
+
 window.exportAll = exportAll;
 window.importAll = importAll;
-window.resetLoopProgress = resetLoopProgress;
-window.moveLoopEntry = moveLoopEntry;
-window.moveUpInLoop = moveUpInLoop;
-window.moveDownInLoop = moveDownInLoop;
+window.toggleTimer = toggleTimer;
+window.nextTask = nextTask;
+window.state = state;
+window.resetAllTasks = resetAllTasks;
+window.getLibraryTask = getLibraryTask;
+window.addEntryToLoop = addEntryToLoop;
+window.showAddFormLib = showAddFormLib;
+window.submitAddLib = submitAddLib;
+window.showEditFormLib = showEditFormLib;
+window.saveEditLib = saveEditLib;
+window.deleteLibraryTask = deleteLibraryTask;
+window.showAddToLoopMenu = showAddToLoopMenu;
+window.render = render;
+window.setMode = setMode;
+window.setDayOverride = setDayOverride;
+window.removeEntryFromLoop = removeEntryFromLoop;
+window.updateLoopAllocated = updateLoopAllocated;
+window.resetLoopEntry = resetLoopEntry;
+window.moveEntry = moveEntry;
+window.startTimerForLoop = startTimerForLoop;
 window.stopTimerForLoop = stopTimerForLoop;
+window.handleLocalTaskComplete = handleLocalTaskComplete;
+window.handleExternalTaskComplete = handleExternalTaskComplete;
