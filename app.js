@@ -1,6 +1,8 @@
 'use strict';
 
-/* ---------- Storage utility ---------- */
+// ============================================================================
+// STORAGE
+// ============================================================================
 const storage = {
   save: (key, data) => {
     try {
@@ -21,139 +23,75 @@ const storage = {
   }
 };
 
-/* ---------- App state (library + loops) ---------- */
+// ============================================================================
+// STATE
+// ============================================================================
 let audioContext = null;
 let swReg = null;
 
-// Constants
-const LOOPS = ['out', 'in_weekday', 'in_weekend'];
-
-const defaultLibrary = [
-  { id: 1, name: 'Coding', note: 'Deep work block', defaultAllocated: 90 },
-  { id: 2, name: 'Exercise', note: 'Quick workout / stretch', defaultAllocated: 30 },
-  { id: 3, name: 'Reading', note: 'Reading / learning', defaultAllocated: 45 }
-];
-
 const state = {
-  // library of tasks (shared name + note)
-  library: [],
-  // loops: each loop holds entries referencing library tasks
-  loops: {
-    out: [],
-    in_weekday: [],
-    in_weekend: []
-  },
-  // which top mode is selected: 'in' or 'out'
-  activeMode: 'in',
-  // override: 'auto' | 'weekday' | 'weekend'
-  dayOverride: 'auto',
-  // timers per-loop
-  timers: {
-    out: { activeTaskId: null, timerStartTime: null, isTimerRunning: false, timerInterval: null },
-    in_weekday: { activeTaskId: null, timerStartTime: null, isTimerRunning: false, timerInterval: null },
-    in_weekend: { activeTaskId: null, timerStartTime: null, isTimerRunning: false, timerInterval: null }
-  },
-  // UI
-  showManageTasks: false,
-  currentManageTab: 'library',
-  currentLoopEditing: 'in_weekday', // derived
+  // Master task library
+  tasks: storage.load('masterTasks', []),
+  
+  // Loops configuration
+  loops: storage.load('loops', {
+    'out': { note: '', assignments: [], currentIndex: 0 },
+    'in-weekday': { note: '', assignments: [], currentIndex: 0 },
+    'in-weekend': { note: '', assignments: [], currentIndex: 0 }
+  }),
+  
+  // Current state
+  mode: storage.load('mode', 'in'), // 'in' or 'out'
+  forceWeekend: storage.load('forceWeekend', false), // manual weekend override
+  currentScreen: 'focus', // 'focus', 'tasks', 'manage'
+  
+  // Timer state
+  timerInterval: null,
+  timerStartTime: storage.load('timerStartTime', null),
+  activeTaskAssignmentId: storage.load('activeTaskAssignmentId', null),
+  activeLoopKey: storage.load('activeLoopKey', null),
+  isTimerRunning: false,
+  
+  // UI state
+  managingLoopKey: null, // which loop is being managed
   isRendering: false,
-  // guard for duplicate completions
-  lastCompletionToken: null
+  lastMidnightCheck: storage.load('lastMidnightCheck', new Date().toDateString())
 };
 
-/* ---------- Service worker registration & messages ---------- */
-async function registerSW() {
-  if ('serviceWorker' in navigator) {
-    try {
-      swReg = await navigator.serviceWorker.register('sw.js');
-      console.log('[APP] SW registered');
-      await navigator.serviceWorker.ready;
-
-      navigator.serviceWorker.addEventListener('message', function (event) {
-        // SW notifies of completion: { type: 'TASK_COMPLETE', loopId, taskId, token }
-        const d = event.data;
-        if (!d || d.type !== 'TASK_COMPLETE') return;
-        handleExternalTaskComplete(d.loopId, d.taskId, d.token);
-      });
-
-      if (Notification.permission === 'default') {
-        Notification.requestPermission().then(p => console.log('[APP] Notification permission:', p));
-      }
-    } catch (err) {
-      console.error('[APP] SW registration failed:', err);
-      swReg = null;
-    }
-  }
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+function generateId() {
+  return Date.now() + Math.random();
 }
 
-function scheduleSWAlarm(loopId, taskName, remainingMinutes, token) {
-  if (!swReg) {
-    // no SW - skip
-    return;
-  }
-
-  const worker = swReg.active || swReg.installing || swReg.waiting;
-  if (!worker) return;
-
-  const delayMs = Math.max(1000, Math.round(remainingMinutes * 60 * 1000));
-  worker.postMessage({
-    type: 'SCHEDULE_ALARM',
-    loopId,
-    taskName,
-    delay: delayMs,
-    token
-  });
+function getActiveLoopKey() {
+  if (state.mode === 'out') return 'out';
+  
+  const now = new Date();
+  const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+  const isWeekend = day === 0 || day === 6;
+  
+  return (state.forceWeekend || isWeekend) ? 'in-weekend' : 'in-weekday';
 }
 
-function cancelSWAlarm() {
-  if (swReg && swReg.active) {
-    swReg.active.postMessage({ type: 'CANCEL_ALARM' });
-  }
+function getActiveLoop() {
+  const key = getActiveLoopKey();
+  return state.loops[key];
 }
 
-/* ---------- Audio notification ---------- */
-function playLocalSound() {
-  try {
-    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
-    if (audioContext.state === 'suspended') audioContext.resume();
-
-    function beep(start, freq, dur) {
-      const osc = audioContext.createOscillator();
-      const gain = audioContext.createGain();
-      osc.connect(gain);
-      gain.connect(audioContext.destination);
-      osc.frequency.value = freq;
-      osc.type = 'sine';
-      gain.gain.setValueAtTime(1.0, start);
-      gain.gain.exponentialRampToValueAtTime(0.01, start + dur);
-      osc.start(start);
-      osc.stop(start + dur);
-    }
-
-    const now = audioContext.currentTime;
-    beep(now, 600, 0.35);
-    beep(now + 0.45, 800, 0.35);
-    beep(now + 0.9, 1000, 0.35);
-
-    if ('vibrate' in navigator) {
-      navigator.vibrate([200, 100, 200]);
-    }
-  } catch (e) {
-    console.error('Sound error:', e);
-  }
+function getTaskById(taskId) {
+  return state.tasks.find(t => t && t.id === taskId);
 }
 
-/* ---------- Helpers & data model operations ---------- */
-
-function uid() {
-  return Date.now() + Math.floor(Math.random() * 1000);
+function getAssignmentById(loopKey, assignmentId) {
+  const loop = state.loops[loopKey];
+  return loop.assignments.find(a => a && a.id === assignmentId);
 }
 
-function escapeHtml(text) {
-  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-  return String(text).replace(/[&<>"']/g, m => map[m]);
+function getIncompleteAssignments(loopKey) {
+  const loop = state.loops[loopKey];
+  return loop.assignments.filter(a => a && a.completed < a.duration);
 }
 
 function formatTime(minutes) {
@@ -163,317 +101,509 @@ function formatTime(minutes) {
   return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
 }
 
-function isWeekendDate(d) {
-  const day = d.getDay();
-  return day === 0 || day === 6;
-}
-
-// Determine active loop id based on mode + override
-function getActiveLoopId() {
-  if (state.activeMode === 'out') return 'out';
-  if (state.dayOverride === 'weekday') return 'in_weekday';
-  if (state.dayOverride === 'weekend') return 'in_weekend';
-  // auto
-  return isWeekendDate(new Date()) ? 'in_weekend' : 'in_weekday';
-}
-
-/* ---------- Persistence ---------- */
-
-function initState() {
-  const saved = storage.load('focus_loops_v1', null);
-  if (!saved) {
-    // initialize defaults (library + loops)
-    state.library = defaultLibrary.map(t => ({ ...t }));
-    state.loops = {
-      out: [ { taskId: 2, allocated: 30, completed: 0, order: 0 } ],
-      in_weekday: defaultLibrary.map((t, i) => ({ taskId: t.id, allocated: t.defaultAllocated, completed: 0, order: i })),
-      in_weekend: defaultLibrary.map((t, i) => ({ taskId: t.id, allocated: Math.round(t.defaultAllocated * 0.66), completed: 0, order: i }))
-    };
-    state.activeMode = 'in';
-    state.dayOverride = 'auto';
-    persistState();
-    return;
-  }
-
-  // load saved state with defensives
-  state.library = Array.isArray(saved.library) ? saved.library : defaultLibrary.map(t => ({ ...t }));
-  state.loops = saved.loops || { out: [], in_weekday: [], in_weekend: [] };
-  state.activeMode = saved.activeMode || 'in';
-  state.dayOverride = saved.dayOverride || 'auto';
-
-  // timers
-  ['out', 'in_weekday', 'in_weekend'].forEach(l => {
-    const t = (saved.timers && saved.timers[l]) || {};
-    state.timers[l] = state.timers[l] || {};
-    state.timers[l].activeTaskId = t.activeTaskId || null;
-    state.timers[l].timerStartTime = t.timerStartTime || null;
-    state.timers[l].isTimerRunning = !!t.isTimerRunning;
-    state.timers[l].timerInterval = null;
-  });
-
-  state.lastCompletionToken = saved.lastCompletionToken || null;
-}
-
-function persistState() {
-  const toSave = {
-    library: state.library,
-    loops: state.loops,
-    activeMode: state.activeMode,
-    dayOverride: state.dayOverride,
-    timers: {
-      out: { activeTaskId: state.timers.out.activeTaskId, timerStartTime: state.timers.out.timerStartTime, isTimerRunning: state.timers.out.isTimerRunning },
-      in_weekday: { activeTaskId: state.timers.in_weekday.activeTaskId, timerStartTime: state.timers.in_weekday.timerStartTime, isTimerRunning: state.timers.in_weekday.isTimerRunning },
-      in_weekend: { activeTaskId: state.timers.in_weekend.activeTaskId, timerStartTime: state.timers.in_weekend.timerStartTime, isTimerRunning: state.timers.in_weekend.isTimerRunning }
-    },
-    lastCompletionToken: state.lastCompletionToken || null
+function formatDuration(minutes) {
+  const labels = {
+    15: '15m', 30: '30m', 45: '45m', 
+    60: '1h', 90: '1.5h', 120: '2h', 
+    150: '2.5h', 180: '3h', 210: '3.5h', 240: '4h'
   };
-  storage.save('focus_loops_v1', toSave);
+  return labels[minutes] || `${minutes}m`;
 }
 
-/* ---------- Library CRUD ---------- */
-
-function addLibraryTask(name, note) {
-  const trimmed = (name || '').trim();
-  if (!trimmed) { alert('Task name cannot be empty'); return false; }
-  const id = uid();
-  state.library.push({ id, name: trimmed, note: (note || '').slice(0, 800), defaultAllocated: 30 });
-  persistState();
-  render();
-  return true;
+function escapeHtml(text) {
+  const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'};
+  return String(text).replace(/[&<>"']/g, m => map[m]);
 }
 
-function updateLibraryTask(id, name, note) {
-  const idx = state.library.findIndex(t => t.id === id);
-  if (idx === -1) return;
-  state.library[idx].name = (name || '').trim();
-  state.library[idx].note = (note || '').slice(0, 800);
-  persistState();
-  render();
+function validateMinutes(value) {
+  const num = parseFloat(value);
+  return (isNaN(num) || num <= 0) ? null : Math.max(0.5, Math.round(num * 2) / 2);
 }
 
-function deleteLibraryTask(id) {
-  const task = state.library.find(t => t && t.id === id);
-  if (!task) return;
-  if (!confirm(`Delete "${task.name}" from library? This will remove it from all loops.`)) return;
-  // remove from loops
-  LOOPS.forEach(loop => {
-    state.loops[loop] = (state.loops[loop] || []).filter(e => e.taskId !== id);
-    // stop timers that reference it
-    if (state.timers[loop].activeTaskId === id) {
-      stopTimerForLoop(loop);
-      state.timers[loop].activeTaskId = null;
-      state.timers[loop].isTimerRunning = false;
-      state.timers[loop].timerStartTime = null;
+function isTaskUsedInLoops(taskId) {
+  return Object.values(state.loops).some(loop => 
+    loop.assignments.some(a => a && a.taskId === taskId)
+  );
+}
+
+function saveState() {
+  storage.save('masterTasks', state.tasks);
+  storage.save('loops', state.loops);
+  storage.save('mode', state.mode);
+  storage.save('forceWeekend', state.forceWeekend);
+  storage.save('timerStartTime', state.timerStartTime);
+  storage.save('activeTaskAssignmentId', state.activeTaskAssignmentId);
+  storage.save('activeLoopKey', state.activeLoopKey);
+  storage.save('lastMidnightCheck', state.lastMidnightCheck);
+}
+
+// ============================================================================
+// MIDNIGHT CHECK
+// ============================================================================
+function checkMidnightTransition() {
+  const today = new Date().toDateString();
+  
+  if (state.lastMidnightCheck !== today) {
+    console.log('[APP] New day detected!');
+    state.lastMidnightCheck = today;
+    
+    // Stop timer if running
+    if (state.isTimerRunning) {
+      stopTimer();
+      state.isTimerRunning = false;
+      
+      // Play sound and show notification
+      playNewDaySound();
+      
+      if (swReg && swReg.active) {
+        const newLoop = getActiveLoopKey();
+        const loopName = newLoop === 'out' ? 'Out' : 
+                        newLoop === 'in-weekend' ? 'Weekend' : 'Weekday';
+        
+        swReg.active.postMessage({
+          type: 'SHOW_NEW_DAY_NOTIFICATION',
+          loopName: loopName
+        });
+      }
     }
+    
+    saveState();
+    render();
+  }
+}
+
+// ============================================================================
+// AUDIO
+// ============================================================================
+function playNewDaySound() {
+  try {
+    // Try to play G-Man audio first
+    const audio = new Audio('/gman.mp3');
+    audio.volume = 1.0;
+    audio.play().catch(err => {
+      console.log('[APP] G-Man audio not found, playing chime');
+      playChime();
+    });
+    
+    if ('vibrate' in navigator) {
+      navigator.vibrate([300, 100, 300, 100, 300]);
+    }
+  } catch (e) {
+    console.error('Audio error:', e);
+    playChime();
+  }
+}
+
+function playChime() {
+  try {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    
+    function beep(start, freq, dur) {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.connect(gain);
+      gain.connect(audioContext.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.8, start);
+      gain.gain.exponentialRampToValueAtTime(0.01, start + dur);
+      osc.start(start);
+      osc.stop(start + dur);
+    }
+    
+    const now = audioContext.currentTime;
+    beep(now, 600, 0.3);
+    beep(now + 0.35, 800, 0.3);
+    beep(now + 0.7, 1000, 0.4);
+  } catch (e) {
+    console.error('Chime error:', e);
+  }
+}
+
+function playCompletionSound() {
+  try {
+    playChime();
+    if ('vibrate' in navigator) {
+      navigator.vibrate([300, 100, 300, 100, 300]);
+    }
+  } catch (e) {
+    console.error('Completion sound error:', e);
+  }
+}
+
+// ============================================================================
+// SERVICE WORKER
+// ============================================================================
+async function registerSW() {
+  if ('serviceWorker' in navigator) {
+    try {
+      swReg = await navigator.serviceWorker.register('sw.js');
+      console.log('[APP] SW registered');
+      
+      await navigator.serviceWorker.ready;
+      console.log('[APP] SW ready');
+      
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data.type === 'TASK_COMPLETE') {
+          console.log('[APP] Task complete message from SW');
+          playCompletionSound();
+        }
+      });
+      
+      if (Notification.permission === 'default') {
+        const permission = await Notification.requestPermission();
+        console.log('[APP] Notification permission:', permission);
+      }
+    } catch (err) {
+      console.error('[APP] SW registration failed:', err);
+    }
+  }
+}
+
+function scheduleSWAlarm(taskName, remainingMinutes) {
+  if (!swReg) return;
+  
+  const worker = swReg.active || swReg.installing || swReg.waiting;
+  if (!worker) return;
+  
+  const delayMs = Math.max(1000, remainingMinutes * 60 * 1000);
+  console.log('[APP] Scheduling SW alarm:', taskName, remainingMinutes.toFixed(2), 'min');
+  
+  worker.postMessage({
+    type: 'SCHEDULE_ALARM',
+    taskName: taskName,
+    delay: delayMs
   });
-  state.library = state.library.filter(t => t.id !== id);
-  persistState();
-  render();
 }
 
-/* ---------- Loop operations ---------- */
-
-function addEntryToLoop(loopId, taskId, allocated) {
-  if (!LOOPS.includes(loopId)) return;
-  const libTask = state.library.find(t => t.id === taskId);
-  if (!libTask) { alert('Selected task not found in library'); return; }
-  const time = validateMinutes(allocated) || libTask.defaultAllocated || 30;
-  state.loops[loopId] = state.loops[loopId] || [];
-  state.loops[loopId].push({ taskId, allocated: time, completed: 0, order: state.loops[loopId].length });
-  persistState();
-  render();
-}
-
-function removeEntryFromLoop(loopId, taskId) {
-  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
-  if (!entry) return;
-  if (!confirm('Remove this task from the loop?')) return;
-  state.loops[loopId] = state.loops[loopId].filter(e => e.taskId !== taskId);
-  if (state.timers[loopId].activeTaskId === taskId) {
-    stopTimerForLoop(loopId);
-    state.timers[loopId].activeTaskId = null;
-    state.timers[loopId].isTimerRunning = false;
-    state.timers[loopId].timerStartTime = null;
+function cancelSWAlarm() {
+  if (swReg && swReg.active) {
+    console.log('[APP] Cancelling SW alarm');
+    swReg.active.postMessage({ type: 'CANCEL_ALARM' });
   }
-  persistState();
-  render();
 }
 
-function updateLoopAllocated(loopId, taskId, allocated) {
-  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
-  const t = validateMinutes(allocated);
-  if (!entry || t === null) { alert('Invalid allocated time'); return; }
-  entry.allocated = t;
-  entry.completed = Math.min(entry.completed, entry.allocated);
-  persistState();
-  render();
-}
-
-function resetLoopEntry(loopId, taskId) {
-  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
-  if (!entry) return;
-  entry.completed = 0;
-  persistState();
-  render();
-}
-
-function moveEntry(loopId, from, to) {
-  const arr = state.loops[loopId];
-  if (!arr || from < 0 || to < 0 || from >= arr.length || to >= arr.length || from === to) return;
-  const item = arr.splice(from, 1)[0];
-  arr.splice(to, 0, item);
-  arr.forEach((it, i) => it.order = i);
-  persistState();
-  render();
-}
-
-/* ---------- Timer logic (per-loop) ---------- */
-
-function getLoopEntries(loopId) {
-  return (state.loops[loopId] || []).filter(Boolean);
-}
-
-function getFirstIncomplete(loopId) {
-  const entries = getLoopEntries(loopId).sort((a, b) => (a.order || 0) - (b.order || 0));
-  return entries.find(e => e.completed < e.allocated) || null;
-}
-
-function startTimerForLoop(loopId) {
-  const timer = state.timers[loopId];
-  if (!timer) return;
-  // Prevent double intervals
-  if (timer.timerInterval) {
-    clearInterval(timer.timerInterval);
-    timer.timerInterval = null;
-  }
-
-  const entry = timer.activeTaskId ? (state.loops[loopId] || []).find(e => e.taskId === timer.activeTaskId) : getFirstIncomplete(loopId);
-  if (!entry) return;
-
-  // stop any other running loop timers
-  LOOPS.forEach(l => { if (l !== loopId) stopTimerForLoop(l); });
-
-  timer.activeTaskId = entry.taskId;
-  timer.timerStartTime = Date.now();
-  timer.isTimerRunning = true;
-  persistState();
-
-  // schedule SW alarm with token to identify this run
-  const token = uid();
-  state.lastCompletionToken = token;
-  persistState();
-  scheduleSWAlarm(loopId, getLibraryTask(entry.taskId).name, Math.max(0.001, entry.allocated - entry.completed), token);
-
-  timer.timerInterval = setInterval(() => {
-    if (!timer.timerStartTime || !timer.activeTaskId) {
-      stopTimerForLoop(loopId);
+// ============================================================================
+// TIMER FUNCTIONS
+// ============================================================================
+function startTimer() {
+  if (state.timerInterval) return;
+  
+  const loopKey = getActiveLoopKey();
+  const loop = state.loops[loopKey];
+  const incomplete = getIncompleteAssignments(loopKey);
+  
+  if (incomplete.length === 0) return;
+  
+  const assignment = incomplete[loop.currentIndex] || incomplete[0];
+  if (!assignment) return;
+  
+  const task = getTaskById(assignment.taskId);
+  if (!task) return;
+  
+  state.timerStartTime = Date.now();
+  state.activeTaskAssignmentId = assignment.id;
+  state.activeLoopKey = loopKey;
+  
+  const remaining = assignment.duration - assignment.completed;
+  scheduleSWAlarm(task.name, remaining);
+  
+  state.timerInterval = setInterval(() => {
+    checkMidnightTransition();
+    
+    if (!state.timerStartTime || !state.activeTaskAssignmentId || !state.activeLoopKey) {
+      stopTimer();
       return;
     }
+    
     const now = Date.now();
-    const elapsed = (now - timer.timerStartTime) / 60000;
-    const idx = (state.loops[loopId] || []).findIndex(e => e && e.taskId === timer.activeTaskId);
-    if (idx !== -1) {
-      const e = state.loops[loopId][idx];
-      e.completed = Math.min(e.completed + elapsed, e.allocated);
-      timer.timerStartTime = now;
-      persistState();
+    const elapsed = (now - state.timerStartTime) / 60000;
+    
+    const currentLoop = state.loops[state.activeLoopKey];
+    const assign = currentLoop.assignments.find(a => a && a.id === state.activeTaskAssignmentId);
+    
+    if (assign) {
+      assign.completed = Math.min(assign.completed + elapsed, assign.duration);
+      state.timerStartTime = now;
+      saveState();
       render();
-      if (e.completed >= e.allocated) {
-        // mark complete and stop — use token to avoid double-handling
-        handleLocalTaskComplete(loopId, e.taskId, state.lastCompletionToken);
+      
+      if (assign.completed >= assign.duration) {
+        stopTimer();
+        state.isTimerRunning = false;
+        playCompletionSound();
+        render();
       }
     } else {
-      stopTimerForLoop(loopId);
+      stopTimer();
     }
   }, 1000);
 }
 
-function stopTimerForLoop(loopId) {
-  const timer = state.timers[loopId];
-  if (!timer) return;
-  if (timer.timerInterval) {
-    clearInterval(timer.timerInterval);
-    timer.timerInterval = null;
+function stopTimer() {
+  if (state.timerInterval) {
+    clearInterval(state.timerInterval);
+    state.timerInterval = null;
   }
-  timer.timerStartTime = null;
-  timer.activeTaskId = null;
-  timer.isTimerRunning = false;
+  state.timerStartTime = null;
+  state.activeTaskAssignmentId = null;
+  state.activeLoopKey = null;
   cancelSWAlarm();
-  persistState();
+  saveState();
 }
 
-/* ---------- Completion handling (single-source-of-truth) ---------- */
+function toggleTimer() {
+  state.isTimerRunning = !state.isTimerRunning;
+  state.isTimerRunning ? startTimer() : stopTimer();
+  render();
+}
 
-// Called when SW signals completion (from background)
-function handleExternalTaskComplete(loopId, taskId, token) {
-  // race-guard: if we already processed this token, ignore
-  if (token && state.lastCompletionToken === token) {
-    // already processed (or will be) — ignore
+function navigateTask(direction) {
+  stopTimer();
+  state.isTimerRunning = false;
+  
+  const loopKey = getActiveLoopKey();
+  const loop = state.loops[loopKey];
+  const incomplete = getIncompleteAssignments(loopKey);
+  
+  if (incomplete.length > 0) {
+    if (direction === 'next') {
+      loop.currentIndex = (loop.currentIndex + 1) % incomplete.length;
+    } else if (direction === 'prev') {
+      loop.currentIndex = (loop.currentIndex - 1 + incomplete.length) % incomplete.length;
+    }
+  }
+  
+  saveState();
+  render();
+}
+
+function checkTimerOnLoad() {
+  if (state.timerStartTime && state.activeTaskAssignmentId && state.activeLoopKey) {
+    const elapsed = (Date.now() - state.timerStartTime) / 60000;
+    const loop = state.loops[state.activeLoopKey];
+    const assign = loop.assignments.find(a => a && a.id === state.activeTaskAssignmentId);
+    
+    if (assign) {
+      const wasComplete = assign.completed >= assign.duration;
+      assign.completed = Math.min(assign.completed + elapsed, assign.duration);
+      const isNowComplete = assign.completed >= assign.duration;
+      
+      if (isNowComplete) {
+        state.timerStartTime = null;
+        state.activeTaskAssignmentId = null;
+        state.activeLoopKey = null;
+        state.isTimerRunning = false;
+        
+        if (!wasComplete) {
+          playCompletionSound();
+        }
+      } else {
+        state.isTimerRunning = true;
+        state.timerStartTime = Date.now();
+      }
+      
+      saveState();
+    }
+  }
+  
+  checkMidnightTransition();
+}
+
+// ============================================================================
+// MASTER TASKS FUNCTIONS
+// ============================================================================
+function createTask(name, note) {
+  if (!name || !name.trim()) {
+    alert('Task name cannot be empty');
+    return null;
+  }
+  
+  const task = {
+    id: generateId(),
+    name: name.trim(),
+    note: (note || '').trim()
+  };
+  
+  state.tasks.push(task);
+  saveState();
+  return task;
+}
+
+function updateTask(taskId, name, note) {
+  const task = getTaskById(taskId);
+  if (!task) return;
+  
+  if (!name || !name.trim()) {
+    alert('Task name cannot be empty');
     return;
   }
-  // find the entry and mark completed if not already
-  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
-  if (!entry) return;
-  const wasComplete = entry.completed >= entry.allocated;
-  entry.completed = Math.min(entry.allocated, entry.completed + 0.0001 + 0); // ensure >= allocated
-  // persist and stop timer for that loop
-  stopTimerForLoop(loopId);
-  playLocalSound();
-  state.lastCompletionToken = token || uid();
-  persistState();
+  
+  task.name = name.trim();
+  task.note = (note || '').trim();
+  saveState();
   render();
 }
 
-// Called when local timer finishes
-function handleLocalTaskComplete(loopId, taskId, token) {
-  // If token matches lastCompletionToken, skip duplicate
-  if (token && state.lastCompletionToken === token) return;
-  // mark entry completed
-  const entry = (state.loops[loopId] || []).find(e => e.taskId === taskId);
-  if (!entry) return;
-  entry.completed = entry.allocated;
-  stopTimerForLoop(loopId);
-  playLocalSound();
-  state.lastCompletionToken = token || uid();
-  persistState();
+function deleteTask(taskId) {
+  if (isTaskUsedInLoops(taskId)) {
+    alert('Cannot delete task - it is assigned to one or more loops');
+    return;
+  }
+  
+  const task = getTaskById(taskId);
+  if (!task || !confirm(`Delete task "${task.name}"?`)) return;
+  
+  state.tasks = state.tasks.filter(t => t && t.id !== taskId);
+  saveState();
   render();
 }
 
-/* ---------- Other helpers ---------- */
-
-function validateMinutes(value) {
-  const num = parseFloat(value);
-  if (isNaN(num) || num <= 0) return null;
-  // allow .5 increments
-  return Math.max(0.5, Math.round(num * 2) / 2);
+// ============================================================================
+// LOOP ASSIGNMENT FUNCTIONS
+// ============================================================================
+function addAssignmentToLoop(loopKey, taskId, duration) {
+  const validDuration = validateMinutes(duration);
+  if (validDuration === null) {
+    alert('Please enter valid duration (> 0)');
+    return;
+  }
+  
+  const assignment = {
+    id: generateId(),
+    taskId: taskId,
+    duration: validDuration,
+    completed: 0
+  };
+  
+  state.loops[loopKey].assignments.push(assignment);
+  saveState();
+  render();
 }
 
-function getLibraryTask(id) {
-  return state.library.find(t => t && t.id === id) || { id: null, name: 'Unknown', note: '', defaultAllocated: 30 };
+function updateAssignment(loopKey, assignmentId, duration, note) {
+  const assignment = getAssignmentById(loopKey, assignmentId);
+  if (!assignment) return;
+  
+  if (duration !== undefined) {
+    const validDuration = validateMinutes(duration);
+    if (validDuration === null) {
+      alert('Please enter valid duration (> 0)');
+      return;
+    }
+    assignment.duration = validDuration;
+    assignment.completed = Math.min(assignment.completed, validDuration);
+  }
+  
+  if (note !== undefined) {
+    const task = getTaskById(assignment.taskId);
+    if (task) {
+      task.note = (note || '').trim();
+    }
+  }
+  
+  saveState();
+  render();
 }
 
-/* ---------- Import / Export (icon-only buttons restored) ---------- */
+function completeAssignment(loopKey, assignmentId) {
+  const assignment = getAssignmentById(loopKey, assignmentId);
+  if (!assignment) return;
+  
+  assignment.completed = assignment.duration;
+  saveState();
+  
+  if (getIncompleteAssignments(loopKey).length === 0) {
+    playCompletionSound();
+  }
+  
+  render();
+}
 
-function exportAll() {
+function resetAssignment(loopKey, assignmentId) {
+  const assignment = getAssignmentById(loopKey, assignmentId);
+  if (!assignment) return;
+  
+  assignment.completed = 0;
+  saveState();
+  render();
+}
+
+function deleteAssignment(loopKey, assignmentId) {
+  const assignment = getAssignmentById(loopKey, assignmentId);
+  if (!assignment) return;
+  
+  const task = getTaskById(assignment.taskId);
+  if (!task || !confirm(`Remove "${task.name}" from this loop?`)) return;
+  
+  state.loops[loopKey].assignments = state.loops[loopKey].assignments.filter(
+    a => a && a.id !== assignmentId
+  );
+  
+  saveState();
+  render();
+}
+
+function moveAssignment(loopKey, fromIndex, toIndex) {
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+  
+  const assignments = state.loops[loopKey].assignments;
+  if (fromIndex >= assignments.length || toIndex >= assignments.length) return;
+  
+  const [moved] = assignments.splice(fromIndex, 1);
+  assignments.splice(toIndex, 0, moved);
+  
+  saveState();
+  render();
+}
+
+function resetLoop(loopKey) {
+  if (!confirm('Reset all tasks in this loop?')) return;
+  
+  state.loops[loopKey].assignments.forEach(a => {
+    if (a) a.completed = 0;
+  });
+  state.loops[loopKey].currentIndex = 0;
+  
+  saveState();
+  render();
+}
+
+function updateLoopNote(loopKey, note) {
+  state.loops[loopKey].note = (note || '').trim();
+  saveState();
+  render();
+}
+
+// ============================================================================
+// IMPORT/EXPORT
+// ============================================================================
+function exportData() {
   try {
-    const payload = {
-      meta: { exportedAt: new Date().toISOString(), version: 1 },
-      library: state.library,
+    if (state.tasks.length === 0) {
+      alert('No data to export');
+      return;
+    }
+    
+    const data = {
+      tasks: state.tasks,
       loops: state.loops,
-      timers: {
-        out: { activeTaskId: state.timers.out.activeTaskId, timerStartTime: state.timers.out.timerStartTime, isTimerRunning: state.timers.out.isTimerRunning },
-        in_weekday: { activeTaskId: state.timers.in_weekday.activeTaskId, timerStartTime: state.timers.in_weekday.timerStartTime, isTimerRunning: state.timers.in_weekday.isTimerRunning },
-        in_weekend: { activeTaskId: state.timers.in_weekend.activeTaskId, timerStartTime: state.timers.in_weekend.timerStartTime, isTimerRunning: state.timers.in_weekend.isTimerRunning }
-      },
-      activeMode: state.activeMode,
-      dayOverride: state.dayOverride,
-      lastCompletionToken: state.lastCompletionToken || null
+      mode: state.mode,
+      forceWeekend: state.forceWeekend,
+      version: 1
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `focus-loops-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `focus-timer-${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -483,40 +613,35 @@ function exportAll() {
   }
 }
 
-function importAll() {
+function importData() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'application/json';
   input.onchange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const imported = JSON.parse(event.target.result);
-        if (!imported || !Array.isArray(imported.library) || !imported.loops) {
-          alert('Invalid file');
+        const data = JSON.parse(event.target.result);
+        
+        if (!data.tasks || !data.loops) {
+          alert('Invalid file format');
           return;
         }
-        if (!confirm(`Replace current state with imported state?`)) return;
-        // stop all timers
-        LOOPS.forEach(l => stopTimerForLoop(l));
-        state.library = imported.library;
-        state.loops = imported.loops;
-        state.activeMode = imported.activeMode || 'in';
-        state.dayOverride = imported.dayOverride || 'auto';
-        // restore timers lightly (but don't start intervals automatically)
-        ['out', 'in_weekday', 'in_weekend'].forEach(l => {
-          const t = (imported.timers && imported.timers[l]) || {};
-          state.timers[l].activeTaskId = t.activeTaskId || null;
-          state.timers[l].timerStartTime = t.timerStartTime || null;
-          state.timers[l].isTimerRunning = !!t.isTimerRunning;
-          state.timers[l].timerInterval = null;
-        });
-        state.lastCompletionToken = imported.lastCompletionToken || null;
-        persistState();
-        render();
-        alert('Import successful!');
+        
+        if (confirm('This will replace ALL current data. Continue?')) {
+          stopTimer();
+          state.isTimerRunning = false;
+          state.tasks = data.tasks;
+          state.loops = data.loops;
+          state.mode = data.mode || 'in';
+          state.forceWeekend = data.forceWeekend || false;
+          saveState();
+          render();
+          alert('Import successful!');
+        }
       } catch (err) {
         alert('Error: ' + err.message);
       }
@@ -526,435 +651,657 @@ function importAll() {
   input.click();
 }
 
-/* ---------- Rendering (reverted to original Claude look) ---------- */
-
-function renderTimerView() {
-  const activeLoop = getActiveLoopId();
-  const incomplete = getLoopEntries(activeLoop).filter(t => t && t.completed < t.allocated);
+// ============================================================================
+// RENDER - FOCUS SCREEN
+// ============================================================================
+function renderFocusScreen() {
+  const loopKey = getActiveLoopKey();
+  const loop = state.loops[loopKey];
+  const incomplete = getIncompleteAssignments(loopKey);
+  
   if (incomplete.length === 0) {
-    return `<div class="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-      <div class="bg-gray-800 rounded-3xl shadow-2xl p-12 max-w-md w-full text-center">
-        <div class="w-24 h-24 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
-          <svg class="w-12 h-12 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="20 6 9 17 4 12"></polyline>
-          </svg>
+    return `<div class="screen">
+      <div class="focus-container">
+        <div class="mode-controls">
+          <div class="toggle-group">
+            <label class="toggle-label">Mode</label>
+            <div class="toggle ${state.mode === 'in' ? 'active-right' : 'active-left'}" onclick="toggleMode()">
+              <span>Out</span><span>In</span>
+            </div>
+          </div>
+          <div class="toggle-group ${state.mode === 'out' ? 'disabled' : ''}">
+            <label class="toggle-label">Day Type</label>
+            <div class="toggle small ${state.forceWeekend || (state.mode === 'in' && loopKey === 'in-weekend') ? 'active-right' : 'active-left'}" 
+                 onclick="${state.mode === 'out' ? '' : 'toggleForceWeekend()'}">
+              <span>Weekday</span><span>Weekend</span>
+            </div>
+          </div>
         </div>
-        <h2 class="text-3xl font-bold text-white mb-4">All Tasks Complete!</h2>
-        <p class="text-gray-400 mb-8">You've finished all your tasks. Great work!</p>
-        <button onclick="resetAllTasks()" class="bg-green-600 text-white px-6 py-3 rounded-full font-semibold transition-colors w-full">Start New Cycle</button>
+        
+        <div class="complete-state">
+          <div class="complete-icon">✓</div>
+          <h2>All Tasks Complete!</h2>
+          <p>Great work! Ready for a new cycle?</p>
+          <button onclick="resetLoop('${loopKey}')" class="btn-primary">Start New Cycle</button>
+        </div>
       </div>
     </div>`;
   }
-
-  if (state.currentLoopEditing === undefined) state.currentLoopEditing = activeLoop;
-  const loopEntries = getLoopEntries(activeLoop).sort((a,b)=> (a.order||0)-(b.order||0));
-  if (state.currentTaskIndex >= loopEntries.length) state.currentTaskIndex = 0;
-  const taskEntry = loopEntries[state.currentTaskIndex] || loopEntries[0];
-  if (!taskEntry) return '<div class="min-h-screen bg-gray-900"></div>';
-
-  const libTask = getLibraryTask(taskEntry.taskId);
-  const progress = Math.min((taskEntry.completed / taskEntry.allocated) * 100, 100);
-  const taskNum = loopEntries.findIndex(t => t.taskId === taskEntry.taskId) + 1;
-
-  // small icon-only Import / Export and Manage icons on the top-right
-  return `<div class="min-h-screen bg-gray-900 flex flex-col">
-    <div class="flex-1 flex items-center justify-center p-4">
-      <div class="bg-gray-800 rounded-3xl shadow-2xl p-8 max-w-md w-full">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-          <div>
-            <div class="inline-block bg-indigo-900 text-indigo-300 px-3 py-1 rounded-full text-sm font-medium mb-2">Task ${taskNum} of ${loopEntries.length}</div>
-            <h1 class="text-4xl font-bold text-white mb-2">${escapeHtml(libTask.name)}</h1>
-            <div class="text-gray-400 text-lg">${formatTime(taskEntry.completed)} / ${formatTime(taskEntry.allocated)}</div>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button class="icon-btn" onclick="exportAll()" title="Export" aria-label="Export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></button>
-            <button class="icon-btn" onclick="importAll()" title="Import" aria-label="Import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg></button>
-            <button class="icon-btn" onclick="state.showManageTasks = true; render()" title="Manage" aria-label="Manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg></button>
+  
+  if (loop.currentIndex >= incomplete.length) loop.currentIndex = 0;
+  const assignment = incomplete[loop.currentIndex];
+  if (!assignment) return '<div class="screen"></div>';
+  
+  const task = getTaskById(assignment.taskId);
+  if (!task) return '<div class="screen"></div>';
+  
+  const progress = Math.min((assignment.completed / assignment.duration) * 100, 100);
+  const loopNote = loop.note || '';
+  const taskNote = task.note || '';
+  
+  return `<div class="screen">
+    <div class="focus-container">
+      <div class="mode-controls">
+        <div class="toggle-group">
+          <label class="toggle-label" onmousedown="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")})" 
+                 onmouseup="hideTooltip()" ontouchstart="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', true)" 
+                 ontouchend="hideTooltip()">Mode</label>
+          <div class="toggle ${state.mode === 'in' ? 'active-right' : 'active-left'}" onclick="toggleMode()">
+            <span>Out</span><span>In</span>
           </div>
         </div>
-
-        <div class="mb-6">
-          <div class="bg-gray-700 rounded-full h-4 overflow-hidden">
-            <div class="bg-gradient-to-r h-full transition-all" style="width: ${progress}%;"></div>
+        <div class="toggle-group ${state.mode === 'out' ? 'disabled' : ''}">
+          <label class="toggle-label" onmousedown="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")})" 
+                 onmouseup="hideTooltip()" ontouchstart="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', true)" 
+                 ontouchend="hideTooltip()">Day Type</label>
+          <div class="toggle small ${state.forceWeekend || (state.mode === 'in' && loopKey === 'in-weekend') ? 'active-right' : 'active-left'}" 
+               onclick="${state.mode === 'out' ? '' : 'toggleForceWeekend()'}">
+            <span>Weekday</span><span>Weekend</span>
           </div>
         </div>
-
-        <div class="flex gap-3 mb-6">
-          <button onclick="toggleTimer()" class="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-semibold text-lg transition-all ${state.timers[activeLoop].isTimerRunning ? 'bg-red-600' : 'bg-indigo-600'} text-white">
-            ${state.timers[activeLoop].isTimerRunning ?
-              '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg> Pause' :
-              '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Start'
-            }
-          </button>
-          ${getLoopEntries(activeLoop).length > 1 ?
-            '<button onclick="nextTask()" class="px-6 py-4 bg-gray-700 rounded-2xl transition-colors text-white" title="Next"><svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg></button>' : ''
-          }
+      </div>
+      
+      <div class="task-display">
+        <h1 class="task-name" onmousedown="showTooltip(event, '${escapeHtml(taskNote).replace(/'/g, "\\'")})" 
+            onmouseup="hideTooltip()" ontouchstart="showTooltip(event, '${escapeHtml(taskNote).replace(/'/g, "\\'")}', true)" 
+            ontouchend="hideTooltip()">${escapeHtml(task.name)}</h1>
+        <div class="task-time">${formatTime(assignment.completed)} / ${formatTime(assignment.duration)}</div>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: ${progress}%"></div>
         </div>
-
-        <div class="text-gray-400 mb-4">${isWeekendDate(new Date()) ? 'Weekend loop active' : 'Weekday loop active'}</div>
-
-        <div class="text-gray-400" style="white-space:pre-line; max-height:5.6em; overflow:hidden;">
-          ${escapeHtml(libTask.note || '')}
-        </div>
-
+      </div>
+      
+      <div class="timer-controls">
+        ${incomplete.length > 1 ? 
+          '<button onclick="navigateTask(\'prev\')" class="btn-nav">←</button>' : 
+          '<div></div>'
+        }
+        <button onclick="toggleTimer()" class="btn-timer ${state.isTimerRunning ? 'running' : ''}">
+          ${state.isTimerRunning ? 'Pause' : 'Start'}
+        </button>
+        ${incomplete.length > 1 ? 
+          '<button onclick="navigateTask(\'next\')" class="btn-nav">→</button>' : 
+          '<div></div>'
+        }
       </div>
     </div>
   </div>`;
 }
 
-/* ---------- Manage view (reverted to original/manage layout) ---------- */
-
-function renderManageView() {
-  const activeLoop = getActiveLoopId();
-  return `<div class="min-h-screen bg-gray-900 p-4 no-scrollbar" style="overflow-y: auto;">
-    <div class="max-w-md mx-auto">
-      <div class="flex items-center gap-3 mb-6">
-        <button onclick="state.showManageTasks = false; render()" class="p-2 bg-gray-800 rounded-lg text-white transition-colors" aria-label="Back">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-        </button>
-        <h2 class="text-2xl font-bold text-white flex-1">Manage Tasks</h2>
-        <button onclick="exportAll()" class="p-2 bg-gray-700 rounded-lg text-white transition-colors" title="Export" aria-label="Export">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-        </button>
-        <button onclick="importAll()" class="p-2 bg-gray-700 rounded-lg text-white transition-colors" title="Import" aria-label="Import">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-        </button>
-        <button onclick="showAddFormLib()" class="p-2 bg-indigo-600 rounded-lg text-white transition-colors" title="Add Task" aria-label="Add task">
-          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-        </button>
+// ============================================================================
+// RENDER - TASKS SCREEN
+// ============================================================================
+function renderTasksScreen() {
+  return `<div class="screen">
+    <div class="manage-container">
+      <div class="manage-header">
+        <h2>Master Tasks</h2>
+        <button onclick="showCreateTaskForm()" class="btn-primary">+ Add Task</button>
       </div>
-
-      <div id="add-form-container"></div>
-
-      <div class="space-y-3" id="tasks-list">
-        ${state.library.map((t, idx) => {
-          if (!t) return '';
-          // library shows name and note only (no durations). Use only id in onclicks to avoid escaping problems
-          return `<div class="bg-gray-800 rounded-2xl p-4" data-lib-id="${t.id}">
-            <div class="flex items-center gap-3">
-              <div style="flex:1; cursor:pointer" onclick="showEditFormLib(${t.id})">
-                <div class="text-white font-medium mb-1">${escapeHtml(t.name)}</div>
-                <div class="text-sm text-gray-400" style="white-space:pre-line; max-height:4.2em; overflow:hidden;">${escapeHtml(t.note || '')}</div>
-              </div>
-              <div class="flex flex-col gap-1">
-                <button onclick="showAddToLoopMenu(${t.id})" class="p-1.5 bg-indigo-600 rounded-lg text-white transition-colors" title="Add to current loop" aria-label="Add to loop">
-                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                </button>
-                <button onclick="showEditFormLib(${t.id})" class="p-1.5 bg-gray-700 rounded-lg text-white transition-colors" title="Edit" aria-label="Edit"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4h6"></path><path d="M18 8l-9 9H3v-6l9-9 6 6z"></path></svg></button>
-                <button onclick="deleteLibraryTask(${t.id})" class="p-1.5 bg-red-600 rounded-lg text-white transition-colors" title="Delete" aria-label="Delete"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
-              </div>
-            </div>
-          </div>`;
-        }).join('')}
+      
+      <div id="create-task-form"></div>
+      
+      <div class="tasks-list">
+        ${state.tasks.length === 0 ? 
+          '<div class="empty-state">No tasks yet. Create your first task!</div>' :
+          state.tasks.map(task => renderTaskItem(task)).join('')
+        }
       </div>
-
-      <div style="height:40px;"></div>
     </div>
   </div>`;
 }
 
-
-/* ---------- Add / Edit library forms (compact) ---------- */
-
-function showAddFormLib() {
-  const c = document.getElementById('add-form-container');
-  if (!c) return;
-  c.innerHTML = `<div class="bg-gray-800 rounded-2xl p-4 mb-4">
-    <input type="text" id="lib-new-name" placeholder="Task name" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white mb-2" style="color:white;" aria-label="New task name">
-    <div class="mb-2"><textarea id="lib-new-note" placeholder="Optional note (4-5 lines)" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white" style="color:white;"></textarea></div>
-    <div style="display:flex; gap:8px;">
-      <button onclick="submitAddLib()" class="px-6 bg-indigo-600 text-white rounded-lg font-medium">Add</button>
-      <button onclick="document.getElementById('add-form-container').innerHTML=''" class="px-4 bg-gray-700 text-white rounded-lg">✕</button>
+function renderTaskItem(task) {
+  const notePreview = task.note ? (task.note.split('\n')[0].substring(0, 50) + (task.note.length > 50 ? '...' : '')) : 'No notes';
+  
+  return `<div class="task-item" data-task-id="${task.id}" ondblclick="showEditTaskForm(${task.id})">
+    <div class="task-item-content">
+      <div class="task-item-name">${escapeHtml(task.name)}</div>
+      <div class="task-item-note" onclick="event.stopPropagation(); toggleNoteExpand(${task.id})" id="note-${task.id}">
+        ${escapeHtml(notePreview)}
+      </div>
     </div>
   </div>`;
-  document.getElementById('lib-new-name').focus();
 }
 
-function submitAddLib() {
-  const name = document.getElementById('lib-new-name').value;
-  const note = document.getElementById('lib-new-note').value;
-  if (addLibraryTask(name, note)) {
-    document.getElementById('add-form-container').innerHTML = '';
+function showCreateTaskForm() {
+  const container = document.getElementById('create-task-form');
+  if (!container) return;
+  
+  container.innerHTML = `<div class="form-card">
+    <h3>New Task</h3>
+    <input type="text" id="new-task-name" placeholder="Task name" class="input-field" />
+    <textarea id="new-task-note" placeholder="Notes (optional)" class="textarea-field" rows="5"></textarea>
+    <div class="form-actions">
+      <button onclick="submitCreateTask()" class="btn-primary">Create</button>
+      <button onclick="cancelCreateTask()" class="btn-secondary">Cancel</button>
+    </div>
+  </div>`;
+  
+  document.getElementById('new-task-name').focus();
+}
+
+function submitCreateTask() {
+  const name = document.getElementById('new-task-name').value;
+  const note = document.getElementById('new-task-note').value;
+  
+  if (createTask(name, note)) {
+    cancelCreateTask();
+    render();
   }
 }
 
-function showEditFormLib(id) {
-  const lib = state.library.find(t => t.id === id);
-  if (!lib) return;
-  const el = document.querySelector(`[data-lib-id="${id}"]`);
-  if (!el) return;
-  // render an inline edit form using the library data (no dangerous inline escaping to onclicks)
-  el.innerHTML = `<div>
-    <input type="text" id="edit-name-${id}" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white mb-2" style="color:white;" value="${escapeHtml(lib.name)}" />
-    <div class="mb-2"><textarea id="edit-note-${id}" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white" style="color:white;">${escapeHtml(lib.note || '')}</textarea></div>
-    <div style="display:flex; gap:8px;">
-      <button onclick="saveEditLib(${id})" class="px-4 bg-indigo-600 text-white rounded-lg text-sm">Save</button>
-      <button onclick="render()" class="px-4 bg-gray-700 text-white rounded-lg text-sm">Cancel</button>
+function cancelCreateTask() {
+  const container = document.getElementById('create-task-form');
+  if (container) container.innerHTML = '';
+}
+
+function showEditTaskForm(taskId) {
+  const task = getTaskById(taskId);
+  if (!task) return;
+  
+  const taskEl = document.querySelector(`[data-task-id="${task.id}"]`);
+  if (!taskEl) return;
+  
+  taskEl.innerHTML = `<div class="edit-form">
+    <input type="text" id="edit-name-${taskId}" value="${escapeHtml(task.name)}" class="input-field" />
+    <textarea id="edit-note-${taskId}" class="textarea-field" rows="5">${escapeHtml(task.note)}</textarea>
+    <div class="form-actions">
+      <button onclick="submitEditTask(${taskId})" class="btn-primary">Save</button>
+      <button onclick="deleteTask(${taskId})" class="btn-danger">Delete</button>
+      <button onclick="render()" class="btn-secondary">Cancel</button>
     </div>
   </div>`;
-  // focus name input for convenience
-  const nm = document.getElementById(`edit-name-${id}`);
-  if (nm) nm.focus();
+  
+  document.getElementById(`edit-name-${taskId}`).focus();
 }
 
-function saveEditLib(id) {
-  const nameEl = document.getElementById(`edit-name-${id}`);
-  const noteEl = document.getElementById(`edit-note-${id}`);
-  const name = nameEl ? nameEl.value : '';
-  const note = noteEl ? noteEl.value : '';
-  updateLibraryTask(id, name, note);
-}
-/* ---------- Adding library task into current loop (duration chosen here) ---------- */
-
-function showAddToLoopMenu(libTaskId) {
-  // small prompt: choose a preset or custom
-  const loopId = getActiveLoopId();
-  const presets = [15, 30, 45, 60, 90, 120, 150, 180, 210, 240];
-  const opts = presets.map(m => `${m}m`).join(', ');
-  const time = prompt(`Add "${getLibraryTask(libTaskId).name}" to ${loopId}\nChoose minutes (presets: ${opts})`, '30');
-  if (!time) return;
-  const valid = validateMinutes(time);
-  if (valid === null) { alert('Invalid minutes'); return; }
-  addEntryToLoop(loopId, libTaskId, valid);
+function submitEditTask(taskId) {
+  const name = document.getElementById(`edit-name-${taskId}`).value;
+  const note = document.getElementById(`edit-note-${taskId}`).value;
+  updateTask(taskId, name, note);
 }
 
-/* ---------- Render and UI helpers ---------- */
+function toggleNoteExpand(taskId) {
+  const noteEl = document.getElementById(`note-${taskId}`);
+  const task = getTaskById(taskId);
+  if (!noteEl || !task) return;
+  
+  if (noteEl.classList.contains('expanded')) {
+    noteEl.classList.remove('expanded');
+    const preview = task.note.split('\n')[0].substring(0, 50) + (task.note.length > 50 ? '...' : '');
+    noteEl.textContent = preview || 'No notes';
+  } else {
+    noteEl.classList.add('expanded');
+    noteEl.textContent = task.note || 'No notes';
+  }
+}
 
+// ============================================================================
+// RENDER - MANAGE SCREEN
+// ============================================================================
+function renderManageScreen() {
+  const currentLoop = state.managingLoopKey || getActiveLoopKey();
+  const loop = state.loops[currentLoop];
+  
+  const loopOptions = {
+    'out': 'Out',
+    'in-weekday': 'In - Weekday',
+    'in-weekend': 'In - Weekend'
+  };
+  
+  return `<div class="screen">
+    <div class="manage-container">
+      <div class="manage-header">
+        <div class="loop-selector">
+          <label>Loop:</label>
+          <select onchange="changeManagingLoop(this.value)" class="select-field">
+            ${Object.entries(loopOptions).map(([key, label]) => 
+              `<option value="${key}" ${key === currentLoop ? 'selected' : ''}>${label}</option>`
+            ).join('')}
+          </select>
+          <button onclick="showEditLoopNote('${currentLoop}')" class="btn-icon" title="Edit loop note">✏️</button>
+        </div>
+        <button onclick="showAddAssignmentForm('${currentLoop}')" class="btn-primary">+ Add Task</button>
+      </div>
+      
+      <div id="edit-loop-note-form"></div>
+      <div id="add-assignment-form"></div>
+      
+      <div class="tasks-list" id="assignments-list">
+        ${loop.assignments.length === 0 ? 
+          '<div class="empty-state">No tasks in this loop. Add one!</div>' :
+          loop.assignments.map((a, idx) => renderAssignmentItem(currentLoop, a, idx)).join('')
+        }
+      </div>
+      
+      ${loop.assignments.length > 0 ? 
+        `<div class="loop-actions">
+          <button onclick="resetLoop('${currentLoop}')" class="btn-secondary">Reset All Progress</button>
+          <button onclick="exportData()" class="btn-secondary">Export Data</button>
+          <button onclick="importData()" class="btn-secondary">Import Data</button>
+        </div>` : ''
+      }
+    </div>
+  </div>`;
+}
+
+function renderAssignmentItem(loopKey, assignment, index) {
+  const task = getTaskById(assignment.taskId);
+  if (!task) return '';
+  
+  const progress = Math.min((assignment.completed / assignment.duration) * 100, 100);
+  const isComplete = assignment.completed >= assignment.duration;
+  
+  return `<div class="assignment-item" data-assignment-id="${assignment.id}" ondblclick="showEditAssignmentForm('${loopKey}', ${assignment.id})">
+    <div class="drag-handle" style="touch-action: none;">⋮⋮</div>
+    <div class="assignment-content">
+      <div class="assignment-name">${escapeHtml(task.name)}</div>
+      <div class="assignment-progress">
+        ${formatTime(assignment.completed)} / ${formatDuration(assignment.duration)}
+        <div class="progress-bar small">
+          <div class="progress-fill" style="width: ${progress}%"></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function showEditLoopNote(loopKey) {
+  const loop = state.loops[loopKey];
+  const container = document.getElementById('edit-loop-note-form');
+  if (!container) return;
+  
+  container.innerHTML = `<div class="form-card">
+    <h3>Edit Loop Note</h3>
+    <textarea id="edit-loop-note-text" class="textarea-field" rows="3" placeholder="Add a note for this loop...">${escapeHtml(loop.note)}</textarea>
+    <div class="form-actions">
+      <button onclick="submitLoopNote('${loopKey}')" class="btn-primary">Save</button>
+      <button onclick="cancelLoopNoteEdit()" class="btn-secondary">Cancel</button>
+    </div>
+  </div>`;
+  
+  document.getElementById('edit-loop-note-text').focus();
+}
+
+function submitLoopNote(loopKey) {
+  const note = document.getElementById('edit-loop-note-text').value;
+  updateLoopNote(loopKey, note);
+  cancelLoopNoteEdit();
+}
+
+function cancelLoopNoteEdit() {
+  const container = document.getElementById('edit-loop-note-form');
+  if (container) container.innerHTML = '';
+}
+
+function showAddAssignmentForm(loopKey) {
+  const container = document.getElementById('add-assignment-form');
+  if (!container) return;
+  
+  if (state.tasks.length === 0) {
+    alert('No tasks available. Create tasks first on the Tasks screen.');
+    return;
+  }
+  
+  const durationOptions = [
+    {value: 15, label: '15m'},
+    {value: 30, label: '30m'},
+    {value: 45, label: '45m'},
+    {value: 60, label: '1h'},
+    {value: 90, label: '1.5h'},
+    {value: 120, label: '2h'},
+    {value: 150, label: '2.5h'},
+    {value: 180, label: '3h'},
+    {value: 210, label: '3.5h'},
+    {value: 240, label: '4h'}
+  ];
+  
+  container.innerHTML = `<div class="form-card">
+    <h3>Add Task to Loop</h3>
+    <select id="add-task-select" class="select-field">
+      <option value="">Select a task...</option>
+      ${state.tasks.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}
+    </select>
+    <select id="add-duration-select" class="select-field">
+      ${durationOptions.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('')}
+      <option value="custom">Custom...</option>
+    </select>
+    <input type="number" id="add-custom-duration" placeholder="Custom minutes" class="input-field" style="display: none;" step="0.5" />
+    <div class="form-actions">
+      <button onclick="submitAddAssignment('${loopKey}')" class="btn-primary">Add</button>
+      <button onclick="cancelAddAssignment()" class="btn-secondary">Cancel</button>
+    </div>
+  </div>`;
+  
+  document.getElementById('add-duration-select').addEventListener('change', function() {
+    const customInput = document.getElementById('add-custom-duration');
+    customInput.style.display = this.value === 'custom' ? 'block' : 'none';
+  });
+}
+
+function submitAddAssignment(loopKey) {
+  const taskId = parseFloat(document.getElementById('add-task-select').value);
+  const durationSelect = document.getElementById('add-duration-select').value;
+  
+  if (!taskId) {
+    alert('Please select a task');
+    return;
+  }
+  
+  let duration;
+  if (durationSelect === 'custom') {
+    duration = document.getElementById('add-custom-duration').value;
+  } else {
+    duration = durationSelect;
+  }
+  
+  addAssignmentToLoop(loopKey, taskId, duration);
+  cancelAddAssignment();
+}
+
+function cancelAddAssignment() {
+  const container = document.getElementById('add-assignment-form');
+  if (container) container.innerHTML = '';
+}
+
+function showEditAssignmentForm(loopKey, assignmentId) {
+  const assignment = getAssignmentById(loopKey, assignmentId);
+  const task = getTaskById(assignment.taskId);
+  if (!assignment || !task) return;
+  
+  const assignEl = document.querySelector(`[data-assignment-id="${assignmentId}"]`);
+  if (!assignEl) return;
+  
+  const durationOptions = [
+    {value: 15, label: '15m'},
+    {value: 30, label: '30m'},
+    {value: 45, label: '45m'},
+    {value: 60, label: '1h'},
+    {value: 90, label: '1.5h'},
+    {value: 120, label: '2h'},
+    {value: 150, label: '2.5h'},
+    {value: 180, label: '3h'},
+    {value: 210, label: '3.5h'},
+    {value: 240, label: '4h'}
+  ];
+  
+  const isComplete = assignment.completed >= assignment.duration;
+  
+  assignEl.innerHTML = `<div class="edit-form">
+    <div class="edit-task-name">${escapeHtml(task.name)}</div>
+    <select id="edit-duration-${assignmentId}" class="select-field">
+      ${durationOptions.map(opt => 
+        `<option value="${opt.value}" ${opt.value === assignment.duration ? 'selected' : ''}>${opt.label}</option>`
+      ).join('')}
+      <option value="custom" ${!durationOptions.find(o => o.value === assignment.duration) ? 'selected' : ''}>Custom...</option>
+    </select>
+    <input type="number" id="edit-custom-duration-${assignmentId}" placeholder="Custom minutes" class="input-field" 
+           style="display: ${durationOptions.find(o => o.value === assignment.duration) ? 'none' : 'block'};" 
+           step="0.5" value="${assignment.duration}" />
+    <textarea id="edit-task-note-${assignmentId}" class="textarea-field" rows="5" placeholder="Task notes...">${escapeHtml(task.note)}</textarea>
+    <div class="form-actions">
+      <button onclick="submitEditAssignment('${loopKey}', ${assignmentId})" class="btn-primary">Save</button>
+      ${!isComplete ? 
+        `<button onclick="completeAssignment('${loopKey}', ${assignmentId})" class="btn-success">Complete</button>` : ''
+      }
+      ${assignment.completed > 0 ? 
+        `<button onclick="resetAssignment('${loopKey}', ${assignmentId})" class="btn-warning">Reset</button>` : ''
+      }
+      <button onclick="deleteAssignment('${loopKey}', ${assignmentId})" class="btn-danger">Remove</button>
+      <button onclick="render()" class="btn-secondary">Cancel</button>
+    </div>
+  </div>`;
+  
+  document.getElementById(`edit-duration-${assignmentId}`).addEventListener('change', function() {
+    const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
+    customInput.style.display = this.value === 'custom' ? 'block' : 'none';
+  });
+}
+
+function submitEditAssignment(loopKey, assignmentId) {
+  const durationSelect = document.getElementById(`edit-duration-${assignmentId}`).value;
+  const note = document.getElementById(`edit-task-note-${assignmentId}`).value;
+  
+  let duration;
+  if (durationSelect === 'custom') {
+    duration = document.getElementById(`edit-custom-duration-${assignmentId}`).value;
+  } else {
+    duration = durationSelect;
+  }
+  
+  updateAssignment(loopKey, assignmentId, duration, note);
+}
+
+function changeManagingLoop(loopKey) {
+  state.managingLoopKey = loopKey;
+  render();
+}
+
+// ============================================================================
+// RENDER - MAIN
+// ============================================================================
 function render() {
   if (state.isRendering) return;
   state.isRendering = true;
+  
   try {
     const app = document.getElementById('app');
     if (!app) return;
-
-    // determine active loop for display & editing
-    const activeLoopId = getActiveLoopId();
-    state.currentLoopEditing = activeLoopId;
-
-    // build top small mode toggle + day override
-    const modeToggle = `<div style="display:flex; align-items:center; justify-content:center; gap:8px; margin:12px;">
-      <div class="mode-toggle" role="tablist" aria-label="Mode">
-        <button class="${state.activeMode==='out' ? 'active' : ''}" onclick="setMode('out')" aria-pressed="${state.activeMode==='out'}">Out</button>
-        <button class="${state.activeMode==='in' ? 'active' : ''}" onclick="setMode('in')" aria-pressed="${state.activeMode==='in'}">In</button>
-      </div>
-      <div style="display:flex; gap:6px; align-items:center;">
-        <select id="day-override" onchange="setDayOverride(this.value)" style="background:#111827;color:#fff;border:1px solid #374151;padding:8px;border-radius:8px;">
-          <option value="auto" ${state.dayOverride==='auto' ? 'selected' : ''}>Auto</option>
-          <option value="weekday" ${state.dayOverride==='weekday' ? 'selected' : ''}>Force weekday</option>
-          <option value="weekend" ${state.dayOverride==='weekend' ? 'selected' : ''}>Force weekend</option>
-        </select>
-      </div>
-    </div>`;
-
-    // main body: either manage view or timer view
-    let bodyHtml = '';
-    if (state.showManageTasks) {
-      bodyHtml = renderManageView();
-    } else {
-      bodyHtml = renderTimerView();
+    
+    let screenHtml = '';
+    switch (state.currentScreen) {
+      case 'focus':
+        screenHtml = renderFocusScreen();
+        break;
+      case 'tasks':
+        screenHtml = renderTasksScreen();
+        break;
+      case 'manage':
+        screenHtml = renderManageScreen();
+        break;
     }
-
-    app.innerHTML = `<div class="container">
-      ${modeToggle}
-      <div class="timer-wrap">
-        ${bodyHtml}
-      </div>
-    </div>`;
-
+    
+    const navHtml = `<nav class="bottom-nav">
+      <button class="${state.currentScreen === 'tasks' ? 'active' : ''}" onclick="switchScreen('tasks')">Tasks</button>
+      <button class="${state.currentScreen === 'focus' ? 'active' : ''}" onclick="switchScreen('focus')">Focus</button>
+      <button class="${state.currentScreen === 'manage' ? 'active' : ''}" onclick="switchScreen('manage')">Manage</button>
+    </nav>`;
+    
+    app.innerHTML = screenHtml + navHtml + '<div id="tooltip" class="tooltip"></div>';
+    
+    if (state.currentScreen === 'manage') {
+      setupDragAndDrop();
+    }
   } finally {
     state.isRendering = false;
   }
 }
 
-/* ---------- Mode and override setters ---------- */
-
-function setMode(mode) {
-  if (mode !== 'in' && mode !== 'out') return;
-  // pause running loop when switching
-  const prevLoop = getActiveLoopId();
-  if (state.timers[prevLoop] && state.timers[prevLoop].isTimerRunning) {
-    stopTimerForLoop(prevLoop);
-    state.timers[prevLoop].isTimerRunning = false;
-  }
-  state.activeMode = mode;
-  persistState();
-  render();
-}
-
-function setDayOverride(val) {
-  if (['auto', 'weekday', 'weekend'].includes(val)) {
-    state.dayOverride = val;
-    persistState();
-    render();
-  }
-}
-
-/* ---------- Timer toggle + next task + stop ---------- */
-
-function toggleTimer() {
-  const loopId = getActiveLoopId();
-  const timer = state.timers[loopId];
-  if (!timer) return;
-  if (timer.isTimerRunning) {
-    stopTimerForLoop(loopId);
-  } else {
-    startTimerForLoop(loopId);
+// ============================================================================
+// UI INTERACTIONS
+// ============================================================================
+function switchScreen(screen) {
+  state.currentScreen = screen;
+  if (screen === 'manage' && !state.managingLoopKey) {
+    state.managingLoopKey = getActiveLoopKey();
   }
   render();
 }
 
-function nextTask() {
-  const loopId = getActiveLoopId();
-  const entries = getLoopEntries(loopId).sort((a, b) => (a.order || 0) - (b.order || 0));
-  if (entries.length === 0) return;
-  const idx = entries.findIndex(e => e && e.taskId === state.timers[loopId].activeTaskId);
-  // stop current timer
-  stopTimerForLoop(loopId);
-  // move to next incomplete
-  let nextIdx = -1;
-  for (let i = (idx + 1) || 0; i < entries.length; i++) {
-    if (entries[i].completed < entries[i].allocated) { nextIdx = i; break; }
-  }
-  if (nextIdx === -1) {
-    // wrap to start
-    for (let i = 0; i < entries.length; i++) {
-      if (entries[i].completed < entries[i].allocated) { nextIdx = i; break; }
-    }
-  }
-  if (nextIdx !== -1) {
-    state.currentTaskIndex = nextIdx;
-    // don't auto-start — wait for user to press Start
-  }
-  persistState();
+function toggleMode() {
+  stopTimer();
+  state.isTimerRunning = false;
+  state.mode = state.mode === 'in' ? 'out' : 'in';
+  saveState();
   render();
 }
 
-/* ---------- Reset and utility functions ---------- */
-
-function resetAllTasks() {
-  if (!confirm('Reset progress for all tasks?')) return;
-  LOOPS.forEach(loop => {
-    (state.loops[loop] || []).forEach(e => e.completed = 0);
-    stopTimerForLoop(loop);
-    state.timers[loop].isTimerRunning = false;
-    state.timers[loop].activeTaskId = null;
-    state.timers[loop].timerStartTime = null;
-  });
-  persistState();
+function toggleForceWeekend() {
+  if (state.mode === 'out') return;
+  
+  stopTimer();
+  state.isTimerRunning = false;
+  state.forceWeekend = !state.forceWeekend;
+  saveState();
   render();
 }
 
-/* ---------- Drag and touch reorder for manage view (desktop drag & mobile up/down) ---------- */
+function showTooltip(event, text, isTouch = false) {
+  const tooltip = document.getElementById('tooltip');
+  if (!tooltip || !text) return;
+  
+  tooltip.textContent = text;
+  tooltip.style.display = 'block';
+  
+  const x = event.clientX || (event.touches && event.touches[0].clientX) || 0;
+  const y = event.clientY || (event.touches && event.touches[0].clientY) || 0;
+  
+  tooltip.style.left = x + 10 + 'px';
+  tooltip.style.top = y + 10 + 'px';
+  
+  if (isTouch) {
+    event.preventDefault();
+  }
+}
 
-function setupDragAndDropManage() {
-  const list = document.getElementById('tasks-list');
+function hideTooltip() {
+  const tooltip = document.getElementById('tooltip');
+  if (tooltip) tooltip.style.display = 'none';
+}
+
+function setupDragAndDrop() {
+  const list = document.getElementById('assignments-list');
   if (!list) return;
-  let draggedEl = null, draggedIdx = null;
-  // use the loop's entries for up/down in manage -> however we keep library list drag disabled (we reorder loop entries separately)
-  // For library list we allow inline edit and add; reordering applies in loop edit, not library.
-  // The original manage view didn't include drag for library; we preserve that.
-}
-
-/* ---------- Visibility handling & onload reconciliation ---------- */
-
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
-    // tab visible again: reconcile timers saved as running
-    LOOPS.forEach(loop => {
-      const ts = state.timers[loop];
-      if (ts.timerStartTime && ts.activeTaskId) {
-        const elapsed = (Date.now() - ts.timerStartTime) / 60000;
-        const entry = (state.loops[loop] || []).find(e => e.taskId === ts.activeTaskId);
-        if (entry) {
-          const wasComplete = entry.completed >= entry.allocated;
-          entry.completed = Math.min(entry.allocated, entry.completed + elapsed);
-          persistState();
-          if (entry.completed >= entry.allocated && !wasComplete) {
-            // mark complete & notify (don’t restart)
-            handleLocalTaskComplete(loop, entry.taskId, state.lastCompletionToken);
-          } else if (entry.completed < entry.allocated) {
-            // resume interval
-            ts.timerStartTime = Date.now();
-            if (ts.isTimerRunning && !ts.timerInterval) startTimerForLoop(loop);
-          }
-        } else {
-          // referenced deleted entry
-          ts.timerStartTime = null; ts.activeTaskId = null; ts.isTimerRunning = false;
-          persistState();
-        }
+  
+  const loopKey = state.managingLoopKey || getActiveLoopKey();
+  let draggedEl = null, draggedIdx = null, touchStartY = 0, touchCurrentY = 0, isDragging = false;
+  
+  list.querySelectorAll('[data-assignment-id]').forEach((el, idx) => {
+    el.setAttribute('draggable', 'true');
+    
+    el.addEventListener('dragstart', e => { draggedEl = el; draggedIdx = idx; el.style.opacity = '0.5'; });
+    el.addEventListener('dragend', e => { 
+      el.style.opacity = '1'; 
+      list.querySelectorAll('[data-assignment-id]').forEach(i => { i.style.borderTop = ''; i.style.borderBottom = ''; });
+    });
+    el.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (draggedEl !== el) {
+        const rect = el.getBoundingClientRect();
+        el.style.borderTop = e.clientY < rect.y + rect.height / 2 ? '2px solid #6366f1' : '';
+        el.style.borderBottom = e.clientY >= rect.y + rect.height / 2 ? '2px solid #6366f1' : '';
       }
     });
+    el.addEventListener('drop', e => { 
+      e.preventDefault(); 
+      if (draggedEl !== el) moveAssignment(loopKey, draggedIdx, idx); 
+    });
+    
+    const grip = el.querySelector('.drag-handle');
+    if (grip) {
+      grip.addEventListener('touchstart', e => {
+        e.preventDefault();
+        draggedEl = el; draggedIdx = idx; touchStartY = e.touches[0].clientY; isDragging = true;
+        el.style.opacity = '0.7'; el.style.transform = 'scale(1.05)';
+      }, { passive: false });
+      
+      grip.addEventListener('touchmove', e => {
+        if (!isDragging) return;
+        e.preventDefault();
+        touchCurrentY = e.touches[0].clientY;
+        el.style.transform = `translateY(${touchCurrentY - touchStartY}px) scale(1.05)`;
+        
+        Array.from(list.querySelectorAll('[data-assignment-id]')).forEach((item, i) => {
+          if (item === el) return;
+          const rect = item.getBoundingClientRect();
+          if (touchCurrentY > rect.top && touchCurrentY < rect.bottom) {
+            item.style.borderTop = i < draggedIdx ? '2px solid #6366f1' : '';
+            item.style.borderBottom = i > draggedIdx ? '2px solid #6366f1' : '';
+          } else {
+            item.style.borderTop = ''; item.style.borderBottom = '';
+          }
+        });
+      }, { passive: false });
+      
+      grip.addEventListener('touchend', e => {
+        if (!isDragging) return;
+        e.preventDefault();
+        isDragging = false;
+        
+        let dropIdx = draggedIdx;
+        Array.from(list.querySelectorAll('[data-assignment-id]')).forEach((item, i) => {
+          const rect = item.getBoundingClientRect();
+          if (touchCurrentY > rect.top && touchCurrentY < rect.bottom && i !== draggedIdx) dropIdx = i;
+          item.style.borderTop = ''; item.style.borderBottom = '';
+        });
+        
+        el.style.opacity = '1'; el.style.transform = '';
+        if (dropIdx !== draggedIdx) moveAssignment(loopKey, draggedIdx, dropIdx);
+        draggedEl = null;
+      }, { passive: false });
+    }
+  });
+}
+
+// ============================================================================
+// VISIBILITY CHANGE
+// ============================================================================
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    console.log('[APP] Tab visible, checking state...');
+    checkTimerOnLoad();
+    if (state.isTimerRunning && !state.timerInterval) {
+      console.log('[APP] Restarting timer...');
+      startTimer();
+    }
     render();
   } else {
-    // when hidden, clear intervals to avoid background work (SW handles notifications)
-    LOOPS.forEach(loop => {
-      const ts = state.timers[loop];
-      if (ts.timerInterval) { clearInterval(ts.timerInterval); ts.timerInterval = null; }
-    });
+    console.log('[APP] Tab hidden, pausing interval...');
+    if (state.timerInterval) {
+      clearInterval(state.timerInterval);
+      state.timerInterval = null;
+    }
   }
 });
 
-/* ---------- Init ---------- */
-
+// ============================================================================
+// INIT
+// ============================================================================
 (async function init() {
   try {
     await registerSW();
-  } catch (e) {
-    console.warn('SW register error', e);
-  }
-  initState();
-  // reconcile timers that were previously running
-  LOOPS.forEach(loop => {
-    const ts = state.timers[loop];
-    if (ts.timerStartTime && ts.activeTaskId) {
-      const entry = (state.loops[loop] || []).find(e => e.taskId === ts.activeTaskId);
-      if (entry) {
-        const elapsed = (Date.now() - ts.timerStartTime) / 60000;
-        entry.completed = Math.min(entry.allocated, entry.completed + elapsed);
-        if (entry.completed >= entry.allocated) {
-          // completed while app was closed
-          entry.completed = entry.allocated;
-          ts.timerStartTime = null; ts.activeTaskId = null; ts.isTimerRunning = false;
-          playLocalSound();
-        } else {
-          // continue running
-          ts.timerStartTime = Date.now();
-          if (ts.isTimerRunning) startTimerForLoop(loop);
-        }
-      } else {
-        // referenced deleted task
-        ts.timerStartTime = null; ts.activeTaskId = null; ts.isTimerRunning = false;
-      }
+    checkTimerOnLoad();
+    if (state.isTimerRunning && !state.timerInterval) {
+      startTimer();
     }
-  });
-
-  render();
+    render();
+  } catch (e) {
+    console.error('[APP] Init error:', e);
+    document.getElementById('app').innerHTML = `
+      <div class="error-screen">
+        <h2>Failed to initialize</h2>
+        <button onclick="location.reload()" class="btn-primary">Reload</button>
+      </div>`;
+  }
 })();
-
-/* ---------- Expose functions for inline buttons used in templates ---------- */
-
-window.exportAll = exportAll;
-window.importAll = importAll;
-window.toggleTimer = toggleTimer;
-window.nextTask = nextTask;
-window.state = state;
-window.resetAllTasks = resetAllTasks;
-window.getLibraryTask = getLibraryTask;
-window.addEntryToLoop = addEntryToLoop;
-window.showAddFormLib = showAddFormLib;
-window.submitAddLib = submitAddLib;
-window.showEditFormLib = showEditFormLib;
-window.saveEditLib = saveEditLib;
-window.deleteLibraryTask = deleteLibraryTask;
-window.showAddToLoopMenu = showAddToLoopMenu;
-window.render = render;
-window.setMode = setMode;
-window.setDayOverride = setDayOverride;
-window.removeEntryFromLoop = removeEntryFromLoop;
-window.updateLoopAllocated = updateLoopAllocated;
-window.resetLoopEntry = resetLoopEntry;
-window.moveEntry = moveEntry;
-window.startTimerForLoop = startTimerForLoop;
-window.stopTimerForLoop = stopTimerForLoop;
-window.handleLocalTaskComplete = handleLocalTaskComplete;
-window.handleExternalTaskComplete = handleExternalTaskComplete;
