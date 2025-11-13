@@ -211,16 +211,19 @@ function playChime() {
       gain.connect(audioContext.destination);
       osc.frequency.value = freq;
       osc.type = 'sine';
-      gain.gain.setValueAtTime(0.8, start);
+      gain.gain.setValueAtTime(1.0, start); // Max volume
       gain.gain.exponentialRampToValueAtTime(0.01, start + dur);
       osc.start(start);
       osc.stop(start + dur);
     }
     
     const now = audioContext.currentTime;
-    beep(now, 600, 0.3);
-    beep(now + 0.35, 800, 0.3);
-    beep(now + 0.7, 1000, 0.4);
+    // Play more beeps, louder and longer
+    beep(now, 600, 0.5);
+    beep(now + 0.6, 800, 0.5);
+    beep(now + 1.2, 1000, 0.5);
+    beep(now + 1.8, 1200, 0.6);
+    beep(now + 2.5, 1000, 0.6);
   } catch (e) {
     console.error('Chime error:', e);
   }
