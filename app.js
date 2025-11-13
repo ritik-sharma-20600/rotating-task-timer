@@ -1338,6 +1338,24 @@ document.addEventListener('visibilitychange', () => {
 // ============================================================================
 (async function init() {
   try {
+    if ('wakeLock' in navigator) {
+      try {
+        const wakeLock = await navigator.wakeLock.request('screen');
+        console.log('[APP] Wake lock acquired - screen will stay on');
+        
+        // Re-acquire if released (e.g., user switches apps)
+        wakeLock.addEventListener('release', async () => {
+          console.log('[APP] Wake lock released, re-acquiring...');
+          try {
+            await navigator.wakeLock.request('screen');
+          } catch (e) {
+            console.log('[APP] Could not re-acquire wake lock:', e);
+          }
+        });
+      } catch (err) {
+        console.log('[APP] Wake lock not supported or denied:', err);
+      }
+    }
     await registerSW();
     checkTimerOnLoad();
     if (state.isTimerRunning && !state.timerInterval) {
