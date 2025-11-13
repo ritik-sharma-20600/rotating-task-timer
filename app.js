@@ -1072,11 +1072,56 @@ function showEditAssignmentForm(loopKey, assignmentId) {
       <button onclick="render()" class="btn-secondary">Cancel</button>
     </div>
   </div>`;
+  setTimeout(() => {
+  const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
+  if (customInput) {
+    let originalValue = customInput.value;
+    
+    customInput.addEventListener('focus', function() {
+      originalValue = this.value;
+      this.select(); // Select all on focus
+    });
+    
+    customInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        this.value = originalValue;
+        this.blur();
+      }
+    });
+  }
   
-  document.getElementById(`edit-duration-${assignmentId}`).addEventListener('change', function() {
-    const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
-    customInput.style.display = this.value === 'custom' ? 'block' : 'none';
-  });
+  const noteArea = document.getElementById(`edit-task-note-${assignmentId}`);
+  if (noteArea) {
+    let originalNote = noteArea.value;
+    
+    noteArea.addEventListener('focus', function() {
+      originalNote = this.value;
+    });
+    
+    noteArea.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        this.value = originalNote;
+        this.blur();
+      }
+    });
+  }
+}, 50);
+  // Focus and select duration input
+setTimeout(() => {
+  const durationInput = document.getElementById(`edit-duration-${assignmentId}`);
+  if (durationInput) {
+    durationInput.addEventListener('change', function() {
+      const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
+      customInput.style.display = this.value === 'custom' ? 'block' : 'none';
+    });
+  }
+  
+  const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
+  if (customInput && customInput.style.display !== 'none') {
+    customInput.focus();
+    customInput.select(); // Select all text
+  }
+}, 50);
 }
 
 function submitEditAssignment(loopKey, assignmentId) {
