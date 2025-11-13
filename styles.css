@@ -110,21 +110,15 @@ button {
   border: none; 
   cursor: pointer; 
   outline: none; 
-  background: transparent;
-  color: inherit;
 }
 
 button:hover { 
-  opacity: 0.95; 
+  opacity: 0.9; 
 }
 
 input { 
   outline: none; 
   border: 1px solid #4b5563; 
-  color: white;
-  background: #111827;
-  padding: 8px;
-  border-radius: 8px;
 }
 
 input:focus { 
@@ -145,41 +139,4 @@ input::placeholder {
 
 .border-gray-600 { 
   border-color: #4b5563; 
-}
-
-/* small icon buttons used in main header and timer card */
-.icon-btn {
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  width:40px;
-  height:40px;
-  border-radius:10px;
-  background:#111827;
-  border:1px solid #2b3340;
-}
-.icon-btn svg { width:18px; height:18px; display:block; }
-
-/* small responsive spacing for mobile */
-.container { padding: 16px; }
-.timer-wrap { max-width: 640px; margin: 12px auto; padding: 16px; }
-.top-controls { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
-.mode-toggle { display:flex; gap:8px; align-items:center; justify-content:center; padding:6px; background:#0b1220; border-radius:999px; border:1px solid #1f2937; }
-.mode-toggle button { padding:8px 12px; border-radius:999px; font-weight:600; color:#9aa3b8; }
-.mode-toggle button.active { background:linear-gradient(90deg,#6366f1,#a855f7); color:#fff; }
-
-/* manage overlay */
-.manage-overlay { position:fixed; left:8px; right:8px; top:72px; bottom:16px; z-index:60; overflow:auto; padding:12px; -webkit-overflow-scrolling:touch; }
-
-/* focus outlines for keyboard users */
-:focus { outline: none; }
-button:focus { box-shadow: 0 0 0 3px rgba(99,102,241,0.18); border-radius:8px; }
-
-/* mobile-friendly up/down small buttons */
-.reorder-small { padding:6px 8px; border-radius:8px; border:1px solid #2b3340; background:#0b1220; color:#cfe0ff; cursor:pointer; }
-
-/* small screen tweaks */
-@media (max-width: 640px) {
-  .timer-wrap { padding: 12px; margin: 8px; }
-  .icon-btn { width:44px; height:44px; border-radius:12px; }
 }
