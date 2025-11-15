@@ -1,14 +1,9 @@
 'use strict';
 
 // ============================================================================
-// STORAGE
-// ============================================================================
-const storage = {
-  save: (key, data) => {
-    // ============================================================================
 // GITHUB GIST SYNC
 // ============================================================================
-let GITHUB_TOKEN = localStorage.getItem('github_token') || null; // Replace with your token
+let GITHUB_TOKEN = localStorage.getItem('github_token') || null;
 const GIST_FILENAME = 'focus-timer-data.json';
 let GIST_ID = localStorage.getItem('gist_id') || null;
 let syncInProgress = false;
@@ -20,9 +15,9 @@ const storage = {
       localStorage.setItem(key, JSON.stringify(data));
       
       // Trigger sync to GitHub
-      if (!syncInProgress) {
+      if (!syncInProgress && GITHUB_TOKEN) {
         await syncToGist();
-      } else {
+      } else if (GITHUB_TOKEN) {
         pendingSync = true;
       }
       return true;
@@ -43,7 +38,7 @@ const storage = {
 };
 
 async function syncToGist() {
-  if (!GITHUB_TOKEN || GITHUB_TOKEN === 'PASTE_YOUR_TOKEN_HERE') {
+  if (!GITHUB_TOKEN) {
     console.log('[SYNC] No GitHub token configured');
     return;
   }
@@ -75,7 +70,6 @@ async function syncToGist() {
     
     let response;
     if (GIST_ID) {
-      // Update existing gist
       response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
         method: 'PATCH',
         headers: {
@@ -85,7 +79,6 @@ async function syncToGist() {
         body: JSON.stringify(gistData)
       });
     } else {
-      // Create new gist
       response = await fetch('https://api.github.com/gists', {
         method: 'POST',
         headers: {
@@ -117,7 +110,7 @@ async function syncToGist() {
 }
 
 async function loadFromGist() {
-  if (!GITHUB_TOKEN || GITHUB_TOKEN === 'PASTE_YOUR_TOKEN_HERE') {
+  if (!GITHUB_TOKEN) {
     console.log('[SYNC] No GitHub token configured, using local storage');
     return false;
   }
@@ -144,7 +137,6 @@ async function loadFromGist() {
         const localSyncTime = parseInt(localStorage.getItem('lastSyncTime') || '0');
         const remoteSyncTime = data.syncTime || 0;
         
-        // Only load if remote is newer
         if (remoteSyncTime > localSyncTime) {
           console.log('[SYNC] ✅ Loading newer data from cloud');
           Object.keys(data).forEach(key => {
@@ -169,16 +161,7 @@ async function loadFromGist() {
   
   return false;
 }
-  },
-  load: (key, defaultValue) => {
-    try {
-      const item = localStorage.getItem(key);
-      return item ? JSON.parse(item) : defaultValue;
-    } catch (e) {
-      return defaultValue;
-    }
-  }
-};
+
 
 // ============================================================================
 // STATE
