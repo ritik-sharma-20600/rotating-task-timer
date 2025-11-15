@@ -8,6 +8,14 @@ const GIST_FILENAME = 'focus-timer-data.json';
 let GIST_ID = localStorage.getItem('gist_id') || null;
 let syncInProgress = false;
 let pendingSync = false;
+let syncTimeout = null;
+
+function debouncedSync() {
+  if (syncTimeout) clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(() => {
+    syncToGist();
+  }, 2000); // Wait 2 seconds after last change
+}
 
 const storage = {
   save: async (key, data) => {
@@ -15,8 +23,8 @@ const storage = {
       localStorage.setItem(key, JSON.stringify(data));
       
       // Trigger sync to GitHub
-      if (!syncInProgress && GITHUB_TOKEN) {
-        await syncToGist();
+      if (GITHUB_TOKEN) {
+        debouncedSync(); 
       } else if (GITHUB_TOKEN) {
         pendingSync = true;
       }
@@ -252,8 +260,8 @@ function formatDuration(minutes) {
 }
 
 function escapeHtml(text) {
-  const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'};
-  return String(text).replace(/[&<>"']/g, m => map[m]);
+  const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;', '\n': '\\n'}; // Add \n escape
+  return String(text).replace(/[&<>"'\n]/g, m => map[m]);
 }
 
 function validateMinutes(value) {
@@ -320,7 +328,7 @@ function checkMidnightTransition() {
 function playNewDaySound() {
   try {
     // Try to play G-Man audio first
-    const audio = new Audio('/gman.mp3');
+    const audio = new Audio('./gman.mp3');
     audio.volume = 1.0;
     audio.play().catch(err => {
       console.log('[APP] G-Man audio not found, playing chime');
@@ -869,7 +877,9 @@ function renderFocusScreen() {
       <div class="task-display">
         <h1 class="task-name" onmousedown="showTooltip(event, '${escapeHtml(taskNote).replace(/'/g, "\\'")})" 
             onmouseup="hideTooltip()" ontouchstart="showTooltip(event, '${escapeHtml(taskNote).replace(/'/g, "\\'")}', true)" 
-            ontouchend="hideTooltip()">${escapeHtml(task.name)}</h1>
+            ontouchend="hideTooltip()"
+            onmouseover="showTooltip(event, '${escapeHtml(taskNote).replace(/'/g, "\\'")}')" onmouseout="hideTooltip()"
+            >${escapeHtml(task.name)}</h1>
         <div class="task-time">${formatTime(assignment.completed)} / ${formatTime(assignment.duration)}</div>
         <div class="progress-bar">
           <div class="progress-fill" style="width: ${progress}%"></div>
@@ -1061,7 +1071,6 @@ function renderSettingsScreen() {
     <div class="manage-container">
       <div class="manage-header">
         <h2>Settings</h2>
-        <button onclick="state.showSettings = false; render()" class="btn-secondary">Close</button>
       </div>
       
       <div class="form-card">
@@ -1430,7 +1439,7 @@ if (state.showSettings) {
   <button class="${state.currentScreen === 'tasks' ? 'active' : ''}" onclick="switchScreen('tasks')">Tasks</button>
   <button class="${state.currentScreen === 'focus' ? 'active' : ''}" onclick="switchScreen('focus')">Focus</button>
   <button class="${state.currentScreen === 'manage' ? 'active' : ''}" onclick="switchScreen('manage')">Manage</button>
-  <button class="${state.showSettings ? 'active' : ''}" onclick="state.showSettings = true; render()" style="font-size: 1.25rem;">⚙️</button>
+  <button class="${state.showSettings ? 'active' : ''}" onclick="state.showSettings = !state.showSettings; render()" style="font-size: 1.25rem;">⚙️</button>
 </nav>`;
     
     app.innerHTML = screenHtml + navHtml + '<div id="tooltip" class="tooltip"></div>';
@@ -1465,9 +1474,11 @@ function toggleMode() {
 function toggleForceWeekend() {
   if (state.mode === 'out') return;
   
+  console.log('[DEBUG] Before toggle:', state.forceWeekend);
   stopTimer();
   state.isTimerRunning = false;
   state.forceWeekend = !state.forceWeekend;
+  console.log('[DEBUG] After toggle:', state.forceWeekend);
   saveState();
   render();
 }
@@ -1620,9 +1631,16 @@ document.addEventListener('visibilitychange', () => {
     const loadedFromCloud = await loadFromGist();
     
     if (loadedFromCloud) {
-      console.log('[APP] ✅ Loaded from cloud, reinitializing state');
-      initState();
-    }
+  console.log('[APP] ✅ Loaded from cloud, reinitializing state');
+  state.tasks = storage.load('masterTasks', []);
+  state.loops = storage.load('loops', {
+    'out': { note: '', assignments: [], currentIndex: 0 },
+    'in-weekday': { note: '', assignments: [], currentIndex: 0 },
+    'in-weekend': { note: '', assignments: [], currentIndex: 0 }
+  });
+  state.mode = storage.load('mode', 'in');
+  state.forceWeekend = storage.load('forceWeekend', false);
+}
     
     checkTimerOnLoad();
     
