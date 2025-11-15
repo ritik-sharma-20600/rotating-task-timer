@@ -5,13 +5,170 @@
 // ============================================================================
 const storage = {
   save: (key, data) => {
+    // ============================================================================
+// GITHUB GIST SYNC
+// ============================================================================
+let GITHUB_TOKEN = localStorage.getItem('github_token') || null; // Replace with your token
+const GIST_FILENAME = 'focus-timer-data.json';
+let GIST_ID = localStorage.getItem('gist_id') || null;
+let syncInProgress = false;
+let pendingSync = false;
+
+const storage = {
+  save: async (key, data) => {
     try {
       localStorage.setItem(key, JSON.stringify(data));
+      
+      // Trigger sync to GitHub
+      if (!syncInProgress) {
+        await syncToGist();
+      } else {
+        pendingSync = true;
+      }
       return true;
     } catch (e) {
       console.error('Storage save failed:', e);
       return false;
     }
+  },
+  
+  load: (key, defaultValue) => {
+    try {
+      const item = localStorage.getItem(key);
+      return item ? JSON.parse(item) : defaultValue;
+    } catch (e) {
+      return defaultValue;
+    }
+  }
+};
+
+async function syncToGist() {
+  if (!GITHUB_TOKEN || GITHUB_TOKEN === 'PASTE_YOUR_TOKEN_HERE') {
+    console.log('[SYNC] No GitHub token configured');
+    return;
+  }
+  
+  syncInProgress = true;
+  
+  try {
+    const data = {
+      masterTasks: localStorage.getItem('masterTasks'),
+      loops: localStorage.getItem('loops'),
+      mode: localStorage.getItem('mode'),
+      forceWeekend: localStorage.getItem('forceWeekend'),
+      timerStartTime: localStorage.getItem('timerStartTime'),
+      activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
+      activeLoopKey: localStorage.getItem('activeLoopKey'),
+      lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
+      syncTime: Date.now()
+    };
+    
+    const gistData = {
+      description: 'Focus Timer - Auto Sync',
+      public: false,
+      files: {
+        [GIST_FILENAME]: {
+          content: JSON.stringify(data, null, 2)
+        }
+      }
+    };
+    
+    let response;
+    if (GIST_ID) {
+      // Update existing gist
+      response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `token ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(gistData)
+      });
+    } else {
+      // Create new gist
+      response = await fetch('https://api.github.com/gists', {
+        method: 'POST',
+        headers: {
+          'Authorization': `token ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(gistData)
+      });
+    }
+    
+    if (response.ok) {
+      const gist = await response.json();
+      GIST_ID = gist.id;
+      localStorage.setItem('gist_id', GIST_ID);
+      console.log('[SYNC] ✅ Synced to GitHub Gist');
+    } else {
+      console.error('[SYNC] ❌ Failed:', response.status);
+    }
+  } catch (err) {
+    console.error('[SYNC] ❌ Error:', err);
+  } finally {
+    syncInProgress = false;
+    
+    if (pendingSync) {
+      pendingSync = false;
+      setTimeout(() => syncToGist(), 1000);
+    }
+  }
+}
+
+async function loadFromGist() {
+  if (!GITHUB_TOKEN || GITHUB_TOKEN === 'PASTE_YOUR_TOKEN_HERE') {
+    console.log('[SYNC] No GitHub token configured, using local storage');
+    return false;
+  }
+  
+  if (!GIST_ID) {
+    console.log('[SYNC] No gist ID, will create on first save');
+    return false;
+  }
+  
+  try {
+    console.log('[SYNC] 📥 Loading from GitHub Gist...');
+    const response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+      headers: {
+        'Authorization': `token ${GITHUB_TOKEN}`
+      }
+    });
+    
+    if (response.ok) {
+      const gist = await response.json();
+      const content = gist.files[GIST_FILENAME]?.content;
+      
+      if (content) {
+        const data = JSON.parse(content);
+        const localSyncTime = parseInt(localStorage.getItem('lastSyncTime') || '0');
+        const remoteSyncTime = data.syncTime || 0;
+        
+        // Only load if remote is newer
+        if (remoteSyncTime > localSyncTime) {
+          console.log('[SYNC] ✅ Loading newer data from cloud');
+          Object.keys(data).forEach(key => {
+            if (key !== 'syncTime' && data[key]) {
+              localStorage.setItem(key, data[key]);
+            }
+          });
+          localStorage.setItem('lastSyncTime', remoteSyncTime.toString());
+          return true;
+        } else {
+          console.log('[SYNC] ℹ️ Local data is newer, keeping it');
+        }
+      }
+    } else if (response.status === 404) {
+      console.log('[SYNC] Gist not found, will create new');
+      GIST_ID = null;
+      localStorage.removeItem('gist_id');
+    }
+  } catch (err) {
+    console.error('[SYNC] ❌ Load error:', err);
+  }
+  
+  return false;
+}
   },
   load: (key, defaultValue) => {
     try {
@@ -44,6 +201,7 @@ const state = {
   mode: storage.load('mode', 'in'), // 'in' or 'out'
   forceWeekend: storage.load('forceWeekend', false), // manual weekend override
   currentScreen: 'focus', // 'focus', 'tasks', 'manage'
+  showSettings: false,
   
   // Timer state
   timerInterval: null,
@@ -135,6 +293,7 @@ function saveState() {
   storage.save('activeTaskAssignmentId', state.activeTaskAssignmentId);
   storage.save('activeLoopKey', state.activeLoopKey);
   storage.save('lastMidnightCheck', state.lastMidnightCheck);
+  localStorage.setItem('lastSyncTime', Date.now().toString());
 }
 
 // ============================================================================
@@ -909,6 +1068,115 @@ function renderManageScreen() {
   </div>`;
 }
 
+// ============================================================================
+// RENDER - SETTINGS SCREEN
+// ============================================================================
+function renderSettingsScreen() {
+  const hasToken = !!GITHUB_TOKEN;
+  
+  return `<div class="screen">
+    <div class="manage-container">
+      <div class="manage-header">
+        <h2>Settings</h2>
+        <button onclick="state.showSettings = false; render()" class="btn-secondary">Close</button>
+      </div>
+      
+      <div class="form-card">
+        <h3>🔄 Cloud Sync (GitHub Gist)</h3>
+        <p style="color: #9ca3af; margin-bottom: 1rem; font-size: 0.875rem;">
+          Sync your tasks across all devices using GitHub Gist. Your data stays private.
+        </p>
+        
+        ${hasToken ? `
+          <div style="padding: 1rem; background: #16a34a33; border-radius: 0.5rem; margin-bottom: 1rem;">
+            <p style="color: #4ade80; font-weight: 600;">✅ Sync Enabled</p>
+            <p style="color: #9ca3af; font-size: 0.875rem; margin-top: 0.5rem;">
+              Your data syncs automatically to GitHub Gist.
+            </p>
+          </div>
+          
+          <div style="display: flex; gap: 0.5rem;">
+            <button onclick="forceSyncNow()" class="btn-primary">Sync Now</button>
+            <button onclick="removeToken()" class="btn-danger">Disconnect</button>
+          </div>
+        ` : `
+          <div style="padding: 1rem; background: #dc262633; border-radius: 0.5rem; margin-bottom: 1rem;">
+            <p style="color: #fca5a5; font-weight: 600;">⚠️ Sync Disabled</p>
+            <p style="color: #9ca3af; font-size: 0.875rem; margin-top: 0.5rem;">
+              Add your GitHub token to enable cloud sync.
+            </p>
+          </div>
+          
+          <div id="token-setup">
+            <p style="color: #9ca3af; font-size: 0.875rem; margin-bottom: 1rem;">
+              <strong>Setup Instructions:</strong><br>
+              1. Go to <a href="https://github.com/settings/tokens" target="_blank" style="color: #4f46e5;">GitHub Settings</a><br>
+              2. Click "Generate new token (classic)"<br>
+              3. Name it "Focus Timer Sync"<br>
+              4. Check only "gist" scope<br>
+              5. Generate and copy the token<br>
+              6. Paste it below:
+            </p>
+            
+            <input type="password" id="github-token-input" placeholder="ghp_xxxxxxxxxxxx" class="input-field" />
+            <button onclick="saveToken()" class="btn-primary" style="width: 100%;">Connect & Sync</button>
+          </div>
+        `}
+      </div>
+      
+      <div class="form-card">
+        <h3>📱 App Info</h3>
+        <p style="color: #9ca3af; font-size: 0.875rem;">
+          <strong>Version:</strong> 2.0<br>
+          <strong>Tasks:</strong> ${state.tasks.length}<br>
+          <strong>Loops:</strong> 3 (Out, In-Weekday, In-Weekend)
+        </p>
+      </div>
+    </div>
+  </div>`;
+}
+
+function saveToken() {
+  const input = document.getElementById('github-token-input');
+  const token = input ? input.value.trim() : '';
+  
+  if (!token) {
+    alert('Please enter a token');
+    return;
+  }
+  
+  if (!token.startsWith('ghp_') && !token.startsWith('github_pat_')) {
+    alert('Invalid token format. GitHub tokens start with "ghp_" or "github_pat_"');
+    return;
+  }
+  
+  localStorage.setItem('github_token', token);
+  GITHUB_TOKEN = token;
+  
+  alert('✅ Token saved! Syncing now...');
+  
+  syncToGist().then(() => {
+    render();
+  });
+}
+
+function removeToken() {
+  if (confirm('Disconnect cloud sync? Your local data will remain, but won\'t sync across devices.')) {
+    localStorage.removeItem('github_token');
+    localStorage.removeItem('gist_id');
+    GITHUB_TOKEN = null;
+    GIST_ID = null;
+    alert('✅ Disconnected from cloud sync');
+    render();
+  }
+}
+
+async function forceSyncNow() {
+  alert('Syncing...');
+  await syncToGist();
+  alert('✅ Sync complete!');
+}
+
 function renderAssignmentItem(loopKey, assignment, index) {
   const task = getTaskById(assignment.taskId);
   if (!task) return '';
@@ -1157,24 +1425,30 @@ function render() {
     const app = document.getElementById('app');
     if (!app) return;
     
-    let screenHtml = '';
-    switch (state.currentScreen) {
-      case 'focus':
-        screenHtml = renderFocusScreen();
-        break;
-      case 'tasks':
-        screenHtml = renderTasksScreen();
-        break;
-      case 'manage':
-        screenHtml = renderManageScreen();
-        break;
-    }
+let screenHtml = '';
+
+if (state.showSettings) {
+  screenHtml = renderSettingsScreen();
+} else {
+  switch (state.currentScreen) {
+    case 'focus':
+      screenHtml = renderFocusScreen();
+      break;
+    case 'tasks':
+      screenHtml = renderTasksScreen();
+      break;
+    case 'manage':
+      screenHtml = renderManageScreen();
+      break;
+  }
+}
     
     const navHtml = `<nav class="bottom-nav">
-      <button class="${state.currentScreen === 'tasks' ? 'active' : ''}" onclick="switchScreen('tasks')">Tasks</button>
-      <button class="${state.currentScreen === 'focus' ? 'active' : ''}" onclick="switchScreen('focus')">Focus</button>
-      <button class="${state.currentScreen === 'manage' ? 'active' : ''}" onclick="switchScreen('manage')">Manage</button>
-    </nav>`;
+  <button class="${state.currentScreen === 'tasks' ? 'active' : ''}" onclick="switchScreen('tasks')">Tasks</button>
+  <button class="${state.currentScreen === 'focus' ? 'active' : ''}" onclick="switchScreen('focus')">Focus</button>
+  <button class="${state.currentScreen === 'manage' ? 'active' : ''}" onclick="switchScreen('manage')">Manage</button>
+  <button class="${state.showSettings ? 'active' : ''}" onclick="state.showSettings = true; render()" style="font-size: 1.25rem;">⚙️</button>
+</nav>`;
     
     app.innerHTML = screenHtml + navHtml + '<div id="tooltip" class="tooltip"></div>';
     
@@ -1225,8 +1499,9 @@ function showTooltip(event, text, isTouch = false) {
   const x = event.clientX || (event.touches && event.touches[0].clientX) || 0;
   const y = event.clientY || (event.touches && event.touches[0].clientY) || 0;
   
-  tooltip.style.left = x + 10 + 'px';
-  tooltip.style.top = y + 10 + 'px';
+  // Position above the touch point (minus tooltip height + offset)
+  tooltip.style.left = Math.max(10, x - 100) + 'px'; // Center horizontally, with 10px min margin
+  tooltip.style.top = Math.max(10, y - 80) + 'px'; // 80px above touch point
   
   if (isTouch) {
     event.preventDefault();
@@ -1338,14 +1613,13 @@ document.addEventListener('visibilitychange', () => {
 // ============================================================================
 (async function init() {
   try {
+    // Wake lock
     if ('wakeLock' in navigator) {
       try {
         const wakeLock = await navigator.wakeLock.request('screen');
-        console.log('[APP] Wake lock acquired - screen will stay on');
+        console.log('[APP] Wake lock acquired');
         
-        // Re-acquire if released (e.g., user switches apps)
         wakeLock.addEventListener('release', async () => {
-          console.log('[APP] Wake lock released, re-acquiring...');
           try {
             await navigator.wakeLock.request('screen');
           } catch (e) {
@@ -1353,20 +1627,41 @@ document.addEventListener('visibilitychange', () => {
           }
         });
       } catch (err) {
-        console.log('[APP] Wake lock not supported or denied:', err);
+        console.log('[APP] Wake lock not available:', err);
       }
     }
+    
     await registerSW();
+    
+    // Load from GitHub Gist first
+    const loadedFromCloud = await loadFromGist();
+    
+    if (loadedFromCloud) {
+      console.log('[APP] ✅ Loaded from cloud, reinitializing state');
+      initState();
+    }
+    
     checkTimerOnLoad();
+    
     if (state.isTimerRunning && !state.timerInterval) {
       startTimer();
     }
+    
     render();
+    
+    // Periodic sync every 30 seconds (backup)
+    setInterval(async () => {
+      if (!syncInProgress && !pendingSync) {
+        await syncToGist();
+      }
+    }, 30000);
+    
   } catch (e) {
     console.error('[APP] Init error:', e);
     document.getElementById('app').innerHTML = `
       <div class="error-screen">
         <h2>Failed to initialize</h2>
+        <p>${e.message}</p>
         <button onclick="location.reload()" class="btn-primary">Reload</button>
       </div>`;
   }
