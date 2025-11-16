@@ -54,17 +54,17 @@ async function syncToGist() {
   syncInProgress = true;
   
   try {
-    const data = {
-      masterTasks: localStorage.getItem('masterTasks'),
-      loops: localStorage.getItem('loops'),
-      mode: localStorage.getItem('mode'),
-      forceWeekend: localStorage.getItem('forceWeekend'),
-      timerStartTime: localStorage.getItem('timerStartTime'),
-      activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
-      activeLoopKey: localStorage.getItem('activeLoopKey'),
-      lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
-      syncTime: Date.now()
-    };
+const data = {
+  masterTasks: localStorage.getItem('masterTasks'),
+  loops: localStorage.getItem('loops'),
+  mode: localStorage.getItem('mode'),
+  forceWeekend: localStorage.getItem('forceWeekend'),
+  timerStartTime: localStorage.getItem('timerStartTime'),
+  activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
+  activeLoopKey: localStorage.getItem('activeLoopKey'),
+  lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
+  syncTime: Date.now()
+};
     
     const gistData = {
       description: 'Focus Timer - Auto Sync',
@@ -291,7 +291,16 @@ function saveState() {
   storage.save('masterTasks', state.tasks);
   storage.save('loops', state.loops);
   storage.save('mode', state.mode);
-  storage.save('forceWeekend', state.forceWeekend);
+  
+  // Save as string 'true', 'false', or 'null'
+  if (state.forceWeekend === true) {
+    localStorage.setItem('forceWeekend', 'true');
+  } else if (state.forceWeekend === false) {
+    localStorage.setItem('forceWeekend', 'false');
+  } else {
+    localStorage.setItem('forceWeekend', 'null');
+  }
+  
   storage.save('timerStartTime', state.timerStartTime);
   storage.save('activeTaskAssignmentId', state.activeTaskAssignmentId);
   storage.save('activeLoopKey', state.activeLoopKey);
@@ -826,6 +835,12 @@ function renderFocusScreen() {
   const loopKey = getActiveLoopKey();
   const loop = state.loops[loopKey];
   const incomplete = getIncompleteAssignments(loopKey);
+  
+  // CRITICAL: Ensure forceWeekend is null when in Out mode
+  if (state.mode === 'out' && state.forceWeekend !== null) {
+    state.forceWeekend = null;
+    saveState();
+  }
   
   if (incomplete.length === 0) {
     return `<div class="screen">
@@ -1678,34 +1693,50 @@ document.addEventListener('visibilitychange', () => {
     
     await registerSW();
     
-    // Load from GitHub Gist first
-const loadedFromCloud = await loadFromGist();
-
-if (loadedFromCloud) {
-  console.log('[APP] ✅ Loaded from cloud, reloading state from storage');
-  // Reload state from localStorage (which was just updated by loadFromGist)
-  state.tasks = JSON.parse(localStorage.getItem('masterTasks')) || [];
-  state.loops = JSON.parse(localStorage.getItem('loops')) || {
-    'out': { note: '', assignments: [], currentIndex: 0 },
-    'in-weekday': { note: '', assignments: [], currentIndex: 0 },
-    'in-weekend': { note: '', assignments: [], currentIndex: 0 }
-  };
-  state.mode = localStorage.getItem('mode') || 'in';
-  state.forceWeekend = localStorage.getItem('forceWeekend') === 'true';
-}
+    // CRITICAL: Load from cloud FIRST, before anything else
+    console.log('[APP] Loading from cloud...');
+    const loadedFromCloud = await loadFromGist();
+    
+    if (loadedFromCloud) {
+      console.log('[APP] ✅ Loaded from cloud, updating state...');
+      
+      // Parse the data that was just written to localStorage
+      try {
+        state.tasks = JSON.parse(localStorage.getItem('masterTasks') || '[]');
+        state.loops = JSON.parse(localStorage.getItem('loops') || '{}');
+        state.mode = localStorage.getItem('mode') || 'in';
+        const forceWeekendStr = localStorage.getItem('forceWeekend');
+        state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
+        state.timerStartTime = parseInt(localStorage.getItem('timerStartTime')) || null;
+        state.activeTaskAssignmentId = parseFloat(localStorage.getItem('activeTaskAssignmentId')) || null;
+        state.activeLoopKey = localStorage.getItem('activeLoopKey') || null;
+        
+        console.log('[APP] State updated from cloud:', {
+          tasks: state.tasks.length,
+          mode: state.mode,
+          forceWeekend: state.forceWeekend
+        });
+      } catch (e) {
+        console.error('[APP] Error parsing cloud data:', e);
+      }
+    } else {
+      console.log('[APP] Using local data');
+    }
     
     checkTimerOnLoad();
     
     if (state.isTimerRunning && !state.timerInterval) {
+      console.log('[APP] Restarting timer...');
       startTimer();
     }
     
     render();
     
-    // Periodic sync every 30 seconds (backup)
-    setInterval(async () => {
-      if (!syncInProgress && !pendingSync) {
-        await syncToGist();
+    // Periodic sync every 30 seconds
+    setInterval(() => {
+      if (!syncInProgress && !pendingSync && GITHUB_TOKEN) {
+        console.log('[APP] Periodic sync...');
+        debouncedSync();
       }
     }, 30000);
     
