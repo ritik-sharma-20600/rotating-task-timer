@@ -189,6 +189,62 @@ async function loadFromGist() {
   return false;
 }
 
+// Force sync before page unload to prevent data loss
+window.addEventListener('beforeunload', (event) => {
+  if (GITHUB_TOKEN && !syncInProgress) {
+    // Cancel any pending debounced sync
+    if (syncTimeout) {
+      clearTimeout(syncTimeout);
+      syncTimeout = null;
+    }
+    
+    // Force immediate sync
+    console.log('[APP] Page unloading, forcing immediate sync');
+    
+    // Use synchronous XHR as last resort (works in beforeunload)
+    const xhr = new XMLHttpRequest();
+    const data = {
+      masterTasks: localStorage.getItem('masterTasks'),
+      loops: localStorage.getItem('loops'),
+      mode: localStorage.getItem('mode'),
+      forceWeekend: localStorage.getItem('forceWeekend'),
+      timerStartTime: localStorage.getItem('timerStartTime'),
+      activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
+      activeLoopKey: localStorage.getItem('activeLoopKey'),
+      lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
+      syncTime: Date.now()
+    };
+
+    const gistData = {
+      description: 'Focus Timer - Auto Sync',
+      public: false,
+      files: {
+        [GIST_FILENAME]: {
+          content: JSON.stringify(data, null, 2)
+        }
+      }
+    };
+
+    const url = GIST_ID 
+      ? `https://api.github.com/gists/${GIST_ID}`
+      : 'https://api.github.com/gists';
+    
+    xhr.open(GIST_ID ? 'PATCH' : 'POST', url, false); // false = synchronous
+    xhr.setRequestHeader('Authorization', `Bearer ${GITHUB_TOKEN}`);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('Accept', 'application/vnd.github.v3+json');
+    
+    try {
+      xhr.send(JSON.stringify(gistData));
+      if (xhr.status === 200 || xhr.status === 201) {
+        console.log('[APP] Emergency sync successful');
+      }
+    } catch (e) {
+      console.error('[APP] Emergency sync failed:', e);
+    }
+  }
+});
+
 
 // ============================================================================
 // STATE
@@ -1804,12 +1860,12 @@ document.addEventListener('visibilitychange', () => {
     render();
     
     // Periodic sync every 30 seconds
-    setInterval(() => {
-      if (!syncInProgress && !pendingSync && GITHUB_TOKEN) {
-        console.log('[APP] Periodic sync...');
-        debouncedSync();
-      }
-    }, 30000);
+setInterval(() => {
+  if (!syncInProgress && !pendingSync && GITHUB_TOKEN) {
+    console.log('[APP] Periodic sync...');
+    debouncedSync();
+  }
+}, 180000); // 3 minutes (180 seconds)
     
   } catch (e) {
     console.error('[APP] Init error:', e);
