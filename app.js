@@ -279,10 +279,12 @@ console.log('[LOAD] Remote time:', new Date(remoteSyncISO).toLocaleString(), '('
 if (remoteHasData && (localIsEmpty || remoteTimestamp > localTimestamp)) {
   console.log('[LOAD] ✅ Loading cloud data (remote is', remoteTimestamp - localTimestamp, 'ms newer)');
   Object.keys(data).forEach(key => {
-    if (key !== 'syncTime' && key !== 'syncTimestamp' && key !== 'deviceTime' && 
-        data[key] !== null && data[key] !== undefined) {
-      localStorage.setItem(key, data[key]);
-    }
+    if (key !== 'syncTime' && key !== 'syncTimestamp' && key !== 'deviceTime') {
+  // Allow null values to be stored (clears timer state properly)
+  if (data[key] !== undefined) {
+    localStorage.setItem(key, data[key]);
+  }
+}
   });
   localStorage.setItem('lastSyncTime', remoteSyncISO);
   localStorage.setItem('lastSyncTimestamp', remoteTimestamp.toString());
@@ -305,11 +307,22 @@ if (remoteHasData && (localIsEmpty || remoteTimestamp > localTimestamp)) {
     return true;
   }
 }
-
 console.log('[LOAD] ℹ️ Local is current (local:', localTimestamp, 'remote:', remoteTimestamp, ')');
 return false;
+      }
+    } else if (response.status === 404) {
+      console.log('[LOAD] Gist not found');
+      GIST_ID = null;
+      localStorage.removeItem('gist_id');
+    }
+  } catch (err) {
+    console.error('[LOAD] Error:', err);
+  }
+  
+  return false;
 }
 
+// Emergency sync before page close
 // Emergency sync before page close
 window.addEventListener('beforeunload', (event) => {
   if (GITHUB_TOKEN && !syncInProgress) {
@@ -326,22 +339,22 @@ window.addEventListener('beforeunload', (event) => {
     console.log('[APP] Page unloading, emergency sync');
     
     const xhr = new XMLHttpRequest();
-// In beforeunload handler, around line 235:
-const nowISO = new Date().toISOString();
-const nowTimestamp = Date.now();
+    const nowISO = new Date().toISOString();
+    const nowTimestamp = Date.now();
 
-const data = {
-  masterTasks: localStorage.getItem('masterTasks'),
-  loops: localStorage.getItem('loops'),
-  mode: localStorage.getItem('mode'),
-  forceWeekend: localStorage.getItem('forceWeekend'),
-  timerStartTime: localStorage.getItem('timerStartTime'),
-  activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
-  activeLoopKey: localStorage.getItem('activeLoopKey'),
-  lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
-  syncTime: nowISO,
-  syncTimestamp: nowTimestamp
-};
+    const data = {
+      masterTasks: localStorage.getItem('masterTasks'),
+      loops: localStorage.getItem('loops'),
+      mode: localStorage.getItem('mode'),
+      forceWeekend: localStorage.getItem('forceWeekend'),
+      timerStartTime: localStorage.getItem('timerStartTime'),
+      activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
+      activeLoopKey: localStorage.getItem('activeLoopKey'),
+      lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
+      syncTime: nowISO,
+      syncTimestamp: nowTimestamp
+    };
+
     const gistData = {
       description: GIST_DESCRIPTION,
       public: false,
@@ -506,7 +519,6 @@ function saveState() {
   storage.save('activeTaskAssignmentId', state.activeTaskAssignmentId);
   storage.save('activeLoopKey', state.activeLoopKey);
   storage.save('lastMidnightCheck', state.lastMidnightCheck);
-  localStorage.setItem('lastSyncTime', Date.now().toString());
 }
 
 // ============================================================================
@@ -935,6 +947,12 @@ function moveAssignment(loopKey, fromIndex, toIndex) {
   assignments.splice(toIndex, 0, moved);
   
   saveState();
+  
+  // Force immediate sync after reorder (critical operation)
+  if (GITHUB_TOKEN && !syncInProgress) {
+    syncToGist();
+  }
+  
   render();
 }
 
