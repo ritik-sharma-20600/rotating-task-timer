@@ -60,6 +60,14 @@ async function syncToGist() {
     console.log('[SYNC] No GitHub token configured');
     return;
   }
+    const masterTasks = localStorage.getItem('masterTasks');
+  const hasData = masterTasks && masterTasks !== 'null' && masterTasks !== '[]';
+  
+  if (!hasData) {
+    console.log('[SYNC] ⚠️ No local data to sync, skipping to prevent overwriting cloud data');
+    return;
+  }
+  
   
   if (syncInProgress) {
     console.log('[SYNC] Sync already in progress, skipping');
@@ -164,18 +172,31 @@ async function loadFromGist() {
         const localSyncTime = parseInt(localStorage.getItem('lastSyncTime') || '0');
         const remoteSyncTime = data.syncTime || 0;
         
-        if (remoteSyncTime > localSyncTime) {
-          console.log('[SYNC] ✅ Loading newer data from cloud');
-          Object.keys(data).forEach(key => {
-            if (key !== 'syncTime' && data[key]) {
-              localStorage.setItem(key, data[key]);
-            }
-          });
-          localStorage.setItem('lastSyncTime', remoteSyncTime.toString());
-          return true;
-        } else {
-          console.log('[SYNC] ℹ️ Local data is newer, keeping it');
-        }
+        const localIsEmpty = !localStorage.getItem('masterTasks') || 
+                     localStorage.getItem('masterTasks') === '[]' ||
+                     localStorage.getItem('masterTasks') === 'null';
+
+// Check if remote has data
+const remoteHasData = data.masterTasks && 
+                      data.masterTasks !== 'null' && 
+                      data.masterTasks !== '[]';
+
+console.log('[SYNC] Local empty:', localIsEmpty, 'Remote has data:', remoteHasData);
+
+// Always load remote data if local is empty and remote has data
+// Otherwise use timestamp comparison
+if (remoteHasData && (localIsEmpty || remoteSyncTime > localSyncTime)) {
+  console.log('[SYNC] ✅ Loading data from cloud');
+  Object.keys(data).forEach(key => {
+    if (key !== 'syncTime' && data[key] !== null && data[key] !== undefined) {
+      localStorage.setItem(key, data[key]);
+    }
+  });
+  localStorage.setItem('lastSyncTime', remoteSyncTime.toString());
+  return true;
+} else {
+  console.log('[SYNC] ℹ️ Keeping local data');
+}
       }
     } else if (response.status === 404) {
       console.log('[SYNC] Gist not found, will create new');
@@ -1252,7 +1273,7 @@ function renderSettingsScreen() {
   </div>`;
 }
 
-function saveToken() {
+async function saveToken() {
   const input = document.getElementById('github-token-input');
   const token = input ? input.value.trim() : '';
   
@@ -1269,11 +1290,30 @@ function saveToken() {
   localStorage.setItem('github_token', token);
   GITHUB_TOKEN = token;
   
-  alert('✅ Token saved! Syncing now...');
+  // Check if local storage is empty
+  const localIsEmpty = !localStorage.getItem('masterTasks') || 
+                       localStorage.getItem('masterTasks') === '[]' ||
+                       localStorage.getItem('masterTasks') === 'null';
   
-  syncToGist().then(() => {
+  if (localIsEmpty) {
+    // Try to load from cloud first
+    alert('✅ Token saved! Loading from cloud...');
+    const loaded = await loadFromGist();
+    
+    if (loaded) {
+      alert('✅ Data loaded from cloud! Reloading page...');
+      setTimeout(() => location.reload(), 500);
+    } else {
+      alert('✅ Token saved! No cloud data found.');
+      render();
+    }
+  } else {
+    // Have local data, sync it up
+    alert('✅ Token saved! Syncing to cloud...');
+    await syncToGist();
+    alert('✅ Synced to cloud!');
     render();
-  });
+  }
 }
 
 function removeToken() {
