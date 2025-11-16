@@ -121,17 +121,18 @@ async function syncToGist() {
   lastSyncTime = Date.now();
   
   try {
-    const data = {
-      masterTasks: localStorage.getItem('masterTasks'),
-      loops: localStorage.getItem('loops'),
-      mode: localStorage.getItem('mode'),
-      forceWeekend: localStorage.getItem('forceWeekend'),
-      timerStartTime: localStorage.getItem('timerStartTime'),
-      activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
-      activeLoopKey: localStorage.getItem('activeLoopKey'),
-      lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
-      syncTime: Date.now()
-    };
+const data = {
+  masterTasks: localStorage.getItem('masterTasks'),
+  loops: localStorage.getItem('loops'),
+  mode: localStorage.getItem('mode'),
+  forceWeekend: localStorage.getItem('forceWeekend'),
+  timerStartTime: localStorage.getItem('timerStartTime'),
+  activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
+  activeLoopKey: localStorage.getItem('activeLoopKey'),
+  lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
+  syncTime: new Date().toISOString(), // ✅ Uses UTC timestamp
+  deviceTime: Date.now() // For debugging
+};
 
     const gistData = {
       description: GIST_DESCRIPTION,
@@ -260,25 +261,27 @@ async function loadFromGist() {
         console.log('[LOAD] Local empty:', localIsEmpty);
         console.log('[LOAD] Remote has data:', remoteHasData);
         
-        const localSyncTime = parseInt(localStorage.getItem('lastSyncTime') || '0');
-        const remoteSyncTime = data.syncTime || 0;
+const localSyncTime = localStorage.getItem('lastSyncTime') || '1970-01-01T00:00:00.000Z';
+const remoteSyncTime = data.syncTime || '1970-01-01T00:00:00.000Z';
+        const localDate = new Date(localSyncTime);
+const remoteDate = new Date(remoteSyncTime);
+
+console.log('[LOAD] Local time:', localDate.toLocaleString());
+console.log('[LOAD] Remote time:', remoteDate.toLocaleString());
         
         // Load remote if: local is empty OR remote is newer
         // Around line 188, AFTER the timestamp comparison logic, ADD:
 // Load remote if: local is empty OR remote is newer
-if (remoteHasData && (localIsEmpty || remoteSyncTime > localSyncTime)) {
+if (remoteHasData && (localIsEmpty || remoteDate > localDate)) {
   console.log('[LOAD] ✅ Loading cloud data');
-  console.log('[LOAD] Remote time:', new Date(remoteSyncTime).toLocaleString());
-  console.log('[LOAD] Local time:', new Date(localSyncTime).toLocaleString());
-  
   Object.keys(data).forEach(key => {
-    if (key !== 'syncTime' && data[key] !== null && data[key] !== undefined) {
+    if (key !== 'syncTime' && key !== 'deviceTime' && data[key] !== null && data[key] !== undefined) {
       localStorage.setItem(key, data[key]);
     }
   });
-  localStorage.setItem('lastSyncTime', remoteSyncTime.toString());
+  localStorage.setItem('lastSyncTime', remoteSyncTime);
   return true;
-} else if (remoteHasData && remoteSyncTime === localSyncTime) {
+} else if (remoteHasData && remoteDate.getTime() === localDate.getTime()) {
   // ✅ ADD THIS: Same timestamp but check if content actually differs
   const localTasks = localStorage.getItem('masterTasks');
   const remoteTasks = data.masterTasks;
@@ -333,7 +336,8 @@ window.addEventListener('beforeunload', (event) => {
       activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
       activeLoopKey: localStorage.getItem('activeLoopKey'),
       lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
-      syncTime: Date.now()
+      syncTime: new Date().toISOString(),
+  deviceTime: Date.now()
     };
 
     const gistData = {
@@ -1317,10 +1321,14 @@ function renderSettingsScreen() {
             </p>
           </div>
           
-<div style="display: flex; gap: 0.5rem; flex-direction: column;">
-  <button onclick="forceSyncNow()" class="btn-primary">Sync Now</button>
-  <button onclick="removeToken()" class="btn-danger">Disconnect & Clear Local Data</button>
+<div style="padding: 0.75rem; background: #16a34a33; border-radius: 0.5rem; margin-bottom: 1rem;">
+  <p style="color: #4ade80; font-size: 0.875rem;">
+    🔄 Auto-syncing every 30 seconds<br>
+    ✅ Syncs when you switch tabs<br>
+    ✅ Syncs when you make changes
+  </p>
 </div>
+<button onclick="removeToken()" class="btn-danger" style="width: 100%;">Disconnect & Clear Local Data</button>
         ` : `
           <div style="padding: 1rem; background: #dc262633; border-radius: 0.5rem; margin-bottom: 1rem;">
             <p style="color: #fca5a5; font-weight: 600;">⚠️ Sync Disabled</p>
@@ -1936,6 +1944,27 @@ document.addEventListener('visibilitychange', async () => {
   }
 });
 
+// Add this AFTER the visibilitychange handler:
+window.addEventListener('focus', async () => {
+  if (GITHUB_TOKEN && !syncInProgress) {
+    console.log('[APP] Window focused, checking for updates...');
+    const loaded = await loadFromGist();
+    if (loaded) {
+      console.log('[APP] ✅ Updates loaded');
+      state.tasks = storage.load('masterTasks', []);
+      state.loops = storage.load('loops', {
+        'out': { note: '', assignments: [], currentIndex: 0 },
+        'in-weekday': { note: '', assignments: [], currentIndex: 0 },
+        'in-weekend': { note: '', assignments: [], currentIndex: 0 }
+      });
+      state.mode = storage.load('mode', 'in');
+      const forceWeekendStr = localStorage.getItem('forceWeekend');
+      state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
+      render();
+    }
+  }
+});
+
 // ============================================================================
 // INIT
 // ============================================================================
@@ -2035,13 +2064,13 @@ document.addEventListener('visibilitychange', async () => {
     
     // Periodic sync every 30 seconds
 setInterval(async () => {
-  if (!syncInProgress && !pendingSync && GITHUB_TOKEN) {
-    console.log('[APP] Periodic two-way sync...');
+  if (!syncInProgress && !pendingSync && GITHUB_TOKEN && !document.hidden) {
+    console.log('[APP] Periodic check for updates...');
     
-    // First check cloud for updates
+    // Check cloud for updates
     const loaded = await loadFromGist();
     if (loaded) {
-      console.log('[APP] Loaded updates from cloud, reloading state...');
+      console.log('[APP] ✅ Loaded updates from cloud');
       state.tasks = storage.load('masterTasks', []);
       state.loops = storage.load('loops', {
         'out': { note: '', assignments: [], currentIndex: 0 },
@@ -2054,10 +2083,10 @@ setInterval(async () => {
       render();
     }
     
-    // Then upload any local changes
+    // Upload local changes
     debouncedSync();
   }
-}, 180000); // 3 minutes
+}, 30000); // ✅ 30 seconds instead of 3 minutes
     
   } catch (e) {
     console.error('[APP] Init error:', e);
