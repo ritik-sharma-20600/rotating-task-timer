@@ -5,10 +5,16 @@
 let GITHUB_TOKEN = localStorage.getItem('github_token') || null;
 let syncTimeout = null;
 let lastSyncTime = 0;
-const MIN_SYNC_INTERVAL = 2000; // Minimum 2 seconds between syncs
+const MIN_SYNC_INTERVAL = 2000;
 
+// At the top with other constants
 const GIST_FILENAME = 'focus-timer-data.json';
-let GIST_ID = localStorage.getItem('gist_id') || null;
+const GIST_DESCRIPTION = 'Focus Timer App Data - DO NOT DELETE';
+
+// ✅ ADD THIS: Allow manual GIST_ID override
+const MANUAL_GIST_ID = null; // Set to 'your-gist-id-here' if you want to force a specific gist
+
+let GIST_ID = MANUAL_GIST_ID || localStorage.getItem('gist_id') || null;
 let syncInProgress = false;
 let pendingSync = false;
 
@@ -20,7 +26,6 @@ function debouncedSync() {
     const timeSinceLastSync = now - lastSyncTime;
     
     if (timeSinceLastSync < MIN_SYNC_INTERVAL) {
-      // Too soon, reschedule
       syncTimeout = setTimeout(() => debouncedSync(), MIN_SYNC_INTERVAL - timeSinceLastSync);
       return;
     }
@@ -28,18 +33,17 @@ function debouncedSync() {
     if (GITHUB_TOKEN && !syncInProgress) {
       syncToGist();
     }
-  }, 1000); // Wait 1 second after last change
+  }, 1000);
 }
 
 const storage = {
   save: async (key, data) => {
     try {
       localStorage.setItem(key, JSON.stringify(data));
-      // Use debounced sync instead of immediate
       debouncedSync();
       return true;
     } catch (e) {
-      console.error('Storage save failed:', e);
+      console.error('[STORAGE] Save failed:', e);
       return false;
     }
   },
@@ -48,29 +52,67 @@ const storage = {
       const item = localStorage.getItem(key);
       return item ? JSON.parse(item) : defaultValue;
     } catch (e) {
+      console.error('[STORAGE] Load failed:', e);
       return defaultValue;
     }
   }
 };
 
+// Find existing gist by description
+async function findExistingGist() {
+  if (MANUAL_GIST_ID) {
+    console.log('[SYNC] Using manual GIST_ID:', MANUAL_GIST_ID);
+    return MANUAL_GIST_ID;
+  }
+  if (!GITHUB_TOKEN) return null;
+  
+  try {
+    console.log('[SYNC] 🔍 Searching for existing gist...');
+    const response = await fetch('https://api.github.com/gists', {
+      headers: {
+        'Authorization': `Bearer ${GITHUB_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+    
+    if (response.ok) {
+      const gists = await response.json();
+      const found = gists.find(g => g.description === GIST_DESCRIPTION);
+      
+      if (found) {
+        console.log('[SYNC] ✅ Found existing gist:', found.id);
+        return found.id;
+      }
+    }
+    
+    console.log('[SYNC] No existing gist found');
+    return null;
+  } catch (err) {
+    console.error('[SYNC] Error finding gist:', err);
+    return null;
+  }
+}
+
 async function syncToGist() {
-  console.log('[SYNC] syncToGist called, token exists:', !!GITHUB_TOKEN);
+  console.log('[SYNC] ========== SYNC START ==========');
+  console.log('[SYNC] Token exists:', !!GITHUB_TOKEN);
   
   if (!GITHUB_TOKEN) {
-    console.log('[SYNC] No GitHub token configured');
+    console.log('[SYNC] No token');
     return;
   }
-    const masterTasks = localStorage.getItem('masterTasks');
+  
+  // Don't sync empty data
+  const masterTasks = localStorage.getItem('masterTasks');
   const hasData = masterTasks && masterTasks !== 'null' && masterTasks !== '[]';
   
   if (!hasData) {
-    console.log('[SYNC] ⚠️ No local data to sync, skipping to prevent overwriting cloud data');
+    console.log('[SYNC] ⚠️ No local data, skipping sync');
     return;
   }
   
-  
   if (syncInProgress) {
-    console.log('[SYNC] Sync already in progress, skipping');
+    console.log('[SYNC] Already in progress');
     pendingSync = true;
     return;
   }
@@ -92,7 +134,7 @@ async function syncToGist() {
     };
 
     const gistData = {
-      description: 'Focus Timer - Auto Sync',
+      description: GIST_DESCRIPTION,
       public: false,
       files: {
         [GIST_FILENAME]: {
@@ -102,43 +144,67 @@ async function syncToGist() {
     };
 
     let response;
+    
+    // If no GIST_ID, search for existing gist first
+    if (!GIST_ID) {
+      console.log('[SYNC] No local GIST_ID, searching...');
+      GIST_ID = await findExistingGist();
+      if (GIST_ID) {
+        localStorage.setItem('gist_id', GIST_ID);
+      }
+    }
+    
     if (GIST_ID) {
+      console.log('[SYNC] 📤 Updating gist:', GIST_ID);
       response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
         method: 'PATCH',
         headers: {
-          'Authorization': `token ${GITHUB_TOKEN}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/vnd.github.v3+json'
         },
         body: JSON.stringify(gistData)
       });
     } else {
+      console.log('[SYNC] 📤 Creating new gist');
       response = await fetch('https://api.github.com/gists', {
         method: 'POST',
         headers: {
-          'Authorization': `token ${GITHUB_TOKEN}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/vnd.github.v3+json'
         },
         body: JSON.stringify(gistData)
       });
     }
 
+    console.log('[SYNC] Response:', response.status);
+
     if (response.ok) {
       const gist = await response.json();
       GIST_ID = gist.id;
       localStorage.setItem('gist_id', GIST_ID);
-      console.log('[SYNC] ✅ Synced to GitHub Gist');
+      localStorage.setItem('lastSyncTime', Date.now().toString());
+      console.log('[SYNC] ✅ SUCCESS! Gist:', GIST_ID);
+      console.log('[SYNC] URL:', gist.html_url);
     } else {
       const errorText = await response.text();
       console.error('[SYNC] ❌ Failed:', response.status, errorText);
+      
+      if (response.status === 404 && GIST_ID) {
+        console.log('[SYNC] Gist not found, will search/create new');
+        GIST_ID = null;
+        localStorage.removeItem('gist_id');
+      }
     }
   } catch (err) {
     console.error('[SYNC] ❌ Error:', err);
   } finally {
     syncInProgress = false;
+    console.log('[SYNC] ========== SYNC END ==========\n');
     
     if (pendingSync) {
       pendingSync = false;
-      console.log('[SYNC] Pending sync detected, scheduling...');
       setTimeout(() => debouncedSync(), 2000);
     }
   }
@@ -146,22 +212,33 @@ async function syncToGist() {
 
 async function loadFromGist() {
   if (!GITHUB_TOKEN) {
-    console.log('[SYNC] No GitHub token configured, using local storage');
-    return false;
-  }
-  
-  if (!GIST_ID) {
-    console.log('[SYNC] No gist ID, will create on first save');
+    console.log('[LOAD] No token');
     return false;
   }
   
   try {
-    console.log('[SYNC] 📥 Loading from GitHub Gist...');
+    // If no GIST_ID, search for existing gist
+    if (!GIST_ID) {
+      console.log('[LOAD] No GIST_ID, searching...');
+      GIST_ID = await findExistingGist();
+      if (GIST_ID) {
+        localStorage.setItem('gist_id', GIST_ID);
+      } else {
+        console.log('[LOAD] No gist found, will create on first sync');
+        return false;
+      }
+    }
+    
+    console.log('[LOAD] 📥 Loading from gist:', GIST_ID);
+    
     const response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
       headers: {
-        'Authorization': `token ${GITHUB_TOKEN}`
+        'Authorization': `Bearer ${GITHUB_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json'
       }
     });
+    
+    console.log('[LOAD] Response:', response.status);
     
     if (response.ok) {
       const gist = await response.json();
@@ -169,60 +246,64 @@ async function loadFromGist() {
       
       if (content) {
         const data = JSON.parse(content);
+        
+        // Check if local is empty
+        const localIsEmpty = !localStorage.getItem('masterTasks') || 
+                             localStorage.getItem('masterTasks') === '[]' ||
+                             localStorage.getItem('masterTasks') === 'null';
+        
+        // Check if remote has data
+        const remoteHasData = data.masterTasks && 
+                              data.masterTasks !== 'null' && 
+                              data.masterTasks !== '[]';
+        
+        console.log('[LOAD] Local empty:', localIsEmpty);
+        console.log('[LOAD] Remote has data:', remoteHasData);
+        
         const localSyncTime = parseInt(localStorage.getItem('lastSyncTime') || '0');
         const remoteSyncTime = data.syncTime || 0;
         
-        const localIsEmpty = !localStorage.getItem('masterTasks') || 
-                     localStorage.getItem('masterTasks') === '[]' ||
-                     localStorage.getItem('masterTasks') === 'null';
-
-// Check if remote has data
-const remoteHasData = data.masterTasks && 
-                      data.masterTasks !== 'null' && 
-                      data.masterTasks !== '[]';
-
-console.log('[SYNC] Local empty:', localIsEmpty, 'Remote has data:', remoteHasData);
-
-// Always load remote data if local is empty and remote has data
-// Otherwise use timestamp comparison
-if (remoteHasData && (localIsEmpty || remoteSyncTime > localSyncTime)) {
-  console.log('[SYNC] ✅ Loading data from cloud');
-  Object.keys(data).forEach(key => {
-    if (key !== 'syncTime' && data[key] !== null && data[key] !== undefined) {
-      localStorage.setItem(key, data[key]);
-    }
-  });
-  localStorage.setItem('lastSyncTime', remoteSyncTime.toString());
-  return true;
-} else {
-  console.log('[SYNC] ℹ️ Keeping local data');
-}
+        // Load remote if: local is empty OR remote is newer
+        if (remoteHasData && (localIsEmpty || remoteSyncTime > localSyncTime)) {
+          console.log('[LOAD] ✅ Loading cloud data');
+          Object.keys(data).forEach(key => {
+            if (key !== 'syncTime' && data[key] !== null && data[key] !== undefined) {
+              localStorage.setItem(key, data[key]);
+            }
+          });
+          localStorage.setItem('lastSyncTime', remoteSyncTime.toString());
+          return true;
+        } else {
+          console.log('[LOAD] ℹ️ Keeping local data');
+        }
       }
     } else if (response.status === 404) {
-      console.log('[SYNC] Gist not found, will create new');
+      console.log('[LOAD] Gist not found');
       GIST_ID = null;
       localStorage.removeItem('gist_id');
     }
   } catch (err) {
-    console.error('[SYNC] ❌ Load error:', err);
+    console.error('[LOAD] Error:', err);
   }
   
   return false;
 }
 
-// Force sync before page unload to prevent data loss
+// Emergency sync before page close
 window.addEventListener('beforeunload', (event) => {
   if (GITHUB_TOKEN && !syncInProgress) {
-    // Cancel any pending debounced sync
     if (syncTimeout) {
       clearTimeout(syncTimeout);
       syncTimeout = null;
     }
     
-    // Force immediate sync
-    console.log('[APP] Page unloading, forcing immediate sync');
+    const masterTasks = localStorage.getItem('masterTasks');
+    const hasData = masterTasks && masterTasks !== 'null' && masterTasks !== '[]';
     
-    // Use synchronous XHR as last resort (works in beforeunload)
+    if (!hasData) return; // Don't sync empty data
+    
+    console.log('[APP] Page unloading, emergency sync');
+    
     const xhr = new XMLHttpRequest();
     const data = {
       masterTasks: localStorage.getItem('masterTasks'),
@@ -237,7 +318,7 @@ window.addEventListener('beforeunload', (event) => {
     };
 
     const gistData = {
-      description: 'Focus Timer - Auto Sync',
+      description: GIST_DESCRIPTION,
       public: false,
       files: {
         [GIST_FILENAME]: {
@@ -250,7 +331,7 @@ window.addEventListener('beforeunload', (event) => {
       ? `https://api.github.com/gists/${GIST_ID}`
       : 'https://api.github.com/gists';
     
-    xhr.open(GIST_ID ? 'PATCH' : 'POST', url, false); // false = synchronous
+    xhr.open(GIST_ID ? 'PATCH' : 'POST', url, false);
     xhr.setRequestHeader('Authorization', `Bearer ${GITHUB_TOKEN}`);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.setRequestHeader('Accept', 'application/vnd.github.v3+json');
@@ -258,14 +339,13 @@ window.addEventListener('beforeunload', (event) => {
     try {
       xhr.send(JSON.stringify(gistData));
       if (xhr.status === 200 || xhr.status === 201) {
-        console.log('[APP] Emergency sync successful');
+        console.log('[APP] Emergency sync OK');
       }
     } catch (e) {
       console.error('[APP] Emergency sync failed:', e);
     }
   }
 });
-
 
 // ============================================================================
 // STATE
@@ -1218,11 +1298,10 @@ function renderSettingsScreen() {
             </p>
           </div>
           
-<div style="display: flex; gap: 0.5rem;">
+// Replace the 4 buttons with just 2:
+<div style="display: flex; gap: 0.5rem; flex-direction: column;">
   <button onclick="forceSyncNow()" class="btn-primary">Sync Now</button>
-  <button onclick="resetSync()" class="btn-warning">Reset Sync</button>
-  <button onclick="removeToken()" class="btn-danger">Disconnect</button>
-  <button onclick="testSyncNow()" class="btn-primary" style="width: 100%;">TEST: Force Sync Now</button>
+  <button onclick="removeToken()" class="btn-danger">Disconnect & Clear Local Data</button>
 </div>
         ` : `
           <div style="padding: 1rem; background: #dc262633; border-radius: 0.5rem; margin-bottom: 1rem;">
@@ -1290,40 +1369,41 @@ async function saveToken() {
   localStorage.setItem('github_token', token);
   GITHUB_TOKEN = token;
   
-  // Check if local storage is empty
-  const localIsEmpty = !localStorage.getItem('masterTasks') || 
-                       localStorage.getItem('masterTasks') === '[]' ||
-                       localStorage.getItem('masterTasks') === 'null';
+  // CRITICAL: Load from cloud first
+  console.log('[TOKEN] Token saved, searching for existing data...');
+  alert('🔍 Searching for your data...');
   
-  if (localIsEmpty) {
-    // Try to load from cloud first
-    alert('✅ Token saved! Loading from cloud...');
-    const loaded = await loadFromGist();
-    
-    if (loaded) {
-      alert('✅ Data loaded from cloud! Reloading page...');
-      setTimeout(() => location.reload(), 500);
-    } else {
-      alert('✅ Token saved! No cloud data found.');
-      render();
-    }
+  const loaded = await loadFromGist();
+  
+  if (loaded) {
+    alert('✅ Found your data! Reloading app...');
+    setTimeout(() => location.reload(), 500);
   } else {
-    // Have local data, sync it up
-    alert('✅ Token saved! Syncing to cloud...');
-    await syncToGist();
-    alert('✅ Synced to cloud!');
+    // No cloud data, sync local data if we have any
+    const hasLocalData = localStorage.getItem('masterTasks') && 
+                        localStorage.getItem('masterTasks') !== 'null' &&
+                        localStorage.getItem('masterTasks') !== '[]';
+    
+    if (hasLocalData) {
+      alert('✅ Token saved! Syncing your data...');
+      await syncToGist();
+      alert('✅ Synced!');
+    } else {
+      alert('✅ Token saved! Start by adding tasks.');
+    }
+    
     render();
   }
 }
 
 function removeToken() {
-  if (confirm('Disconnect cloud sync? Your local data will remain, but won\'t sync across devices.')) {
-    localStorage.removeItem('github_token');
-    localStorage.removeItem('gist_id');
+  if (confirm('Disconnect? This will clear ALL local data. Your cloud data stays safe.')) {
+    // Clear everything local
+    localStorage.clear();
     GITHUB_TOKEN = null;
     GIST_ID = null;
-    alert('✅ Disconnected from cloud sync');
-    render();
+    alert('✅ Disconnected. Reloading...');
+    setTimeout(() => location.reload(), 500);
   }
 }
 
