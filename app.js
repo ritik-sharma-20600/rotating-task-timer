@@ -1298,7 +1298,6 @@ function renderSettingsScreen() {
             </p>
           </div>
           
-// Replace the 4 buttons with just 2:
 <div style="display: flex; gap: 0.5rem; flex-direction: column;">
   <button onclick="forceSyncNow()" class="btn-primary">Sync Now</button>
   <button onclick="removeToken()" class="btn-danger">Disconnect & Clear Local Data</button>
