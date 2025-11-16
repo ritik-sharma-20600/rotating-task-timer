@@ -14,20 +14,25 @@ body {
   -webkit-tap-highlight-color: transparent;
   overflow: hidden;
   color: #fff;
+  position: fixed; /* ADD THIS */
+  width: 100%; /* ADD THIS */
+  height: 100%; /* ADD THIS */
 }
 
 #app {
   height: 100vh;
+  height: 100dvh; /* ADD THIS - Dynamic viewport for mobile */
   display: flex;
   flex-direction: column;
+  overflow: hidden; /* ADD THIS */
 }
 
-/* ============ SCREENS ============ */
 .screen {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   padding-bottom: 80px;
+  -webkit-overflow-scrolling: touch; /* ADD THIS - Smooth iOS scrolling */
 }
 
 .screen::-webkit-scrollbar {
