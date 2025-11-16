@@ -264,18 +264,37 @@ async function loadFromGist() {
         const remoteSyncTime = data.syncTime || 0;
         
         // Load remote if: local is empty OR remote is newer
-        if (remoteHasData && (localIsEmpty || remoteSyncTime > localSyncTime)) {
-          console.log('[LOAD] ✅ Loading cloud data');
-          Object.keys(data).forEach(key => {
-            if (key !== 'syncTime' && data[key] !== null && data[key] !== undefined) {
-              localStorage.setItem(key, data[key]);
-            }
-          });
-          localStorage.setItem('lastSyncTime', remoteSyncTime.toString());
-          return true;
-        } else {
-          console.log('[LOAD] ℹ️ Keeping local data');
-        }
+        // Around line 188, AFTER the timestamp comparison logic, ADD:
+// Load remote if: local is empty OR remote is newer
+if (remoteHasData && (localIsEmpty || remoteSyncTime > localSyncTime)) {
+  console.log('[LOAD] ✅ Loading cloud data');
+  console.log('[LOAD] Remote time:', new Date(remoteSyncTime).toLocaleString());
+  console.log('[LOAD] Local time:', new Date(localSyncTime).toLocaleString());
+  
+  Object.keys(data).forEach(key => {
+    if (key !== 'syncTime' && data[key] !== null && data[key] !== undefined) {
+      localStorage.setItem(key, data[key]);
+    }
+  });
+  localStorage.setItem('lastSyncTime', remoteSyncTime.toString());
+  return true;
+} else if (remoteHasData && remoteSyncTime === localSyncTime) {
+  // ✅ ADD THIS: Same timestamp but check if content actually differs
+  const localTasks = localStorage.getItem('masterTasks');
+  const remoteTasks = data.masterTasks;
+  
+  if (localTasks !== remoteTasks) {
+    console.log('[LOAD] ⚠️ Same timestamp but different content, taking cloud version');
+    Object.keys(data).forEach(key => {
+      if (key !== 'syncTime' && data[key] !== null && data[key] !== undefined) {
+        localStorage.setItem(key, data[key]);
+      }
+    });
+    return true;
+  }
+} else {
+  console.log('[LOAD] ℹ️ Keeping local data (newer)');
+}
       }
     } else if (response.status === 404) {
       console.log('[LOAD] Gist not found');
@@ -1416,9 +1435,26 @@ function resetSync() {
 }
 
 async function forceSyncNow() {
-  alert('Syncing...');
-  await syncToGist();
-  alert('✅ Sync complete!');
+  if (!GITHUB_TOKEN) {
+    alert('❌ No token configured');
+    return;
+  }
+  
+  console.log('[MANUAL SYNC] Starting two-way sync...');
+  alert('🔄 Syncing...');
+  
+  try {
+    // First, check if cloud has newer data
+    await loadFromGist();
+    
+    // Then, upload local changes if any
+    await syncToGist();
+    
+    alert('✅ Sync complete! Reloading...');
+    setTimeout(() => location.reload(), 500);
+  } catch (err) {
+    alert('❌ Sync failed: ' + err.message);
+  }
 }
 
 function renderAssignmentItem(loopKey, assignment, index) {
@@ -1863,9 +1899,28 @@ function setupDragAndDrop() {
 // ============================================================================
 // VISIBILITY CHANGE
 // ============================================================================
-document.addEventListener('visibilitychange', () => {
+document.addEventListener('visibilitychange', async () => {
   if (!document.hidden) {
-    console.log('[APP] Tab visible, checking state...');
+    console.log('[APP] Tab visible, checking for updates...');
+    
+    // Check cloud for updates
+    if (GITHUB_TOKEN) {
+      const loaded = await loadFromGist();
+      if (loaded) {
+        console.log('[APP] ✅ Loaded updates from cloud');
+        // Reload state from localStorage
+        state.tasks = storage.load('masterTasks', []);
+        state.loops = storage.load('loops', {
+          'out': { note: '', assignments: [], currentIndex: 0 },
+          'in-weekday': { note: '', assignments: [], currentIndex: 0 },
+          'in-weekend': { note: '', assignments: [], currentIndex: 0 }
+        });
+        state.mode = storage.load('mode', 'in');
+        const forceWeekendStr = localStorage.getItem('forceWeekend');
+        state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
+      }
+    }
+    
     checkTimerOnLoad();
     if (state.isTimerRunning && !state.timerInterval) {
       console.log('[APP] Restarting timer...');
@@ -1979,12 +2034,30 @@ document.addEventListener('visibilitychange', () => {
     render();
     
     // Periodic sync every 30 seconds
-setInterval(() => {
+setInterval(async () => {
   if (!syncInProgress && !pendingSync && GITHUB_TOKEN) {
-    console.log('[APP] Periodic sync...');
+    console.log('[APP] Periodic two-way sync...');
+    
+    // First check cloud for updates
+    const loaded = await loadFromGist();
+    if (loaded) {
+      console.log('[APP] Loaded updates from cloud, reloading state...');
+      state.tasks = storage.load('masterTasks', []);
+      state.loops = storage.load('loops', {
+        'out': { note: '', assignments: [], currentIndex: 0 },
+        'in-weekday': { note: '', assignments: [], currentIndex: 0 },
+        'in-weekend': { note: '', assignments: [], currentIndex: 0 }
+      });
+      state.mode = storage.load('mode', 'in');
+      const forceWeekendStr = localStorage.getItem('forceWeekend');
+      state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
+      render();
+    }
+    
+    // Then upload any local changes
     debouncedSync();
   }
-}, 180000); // 3 minutes (180 seconds)
+}, 180000); // 3 minutes
     
   } catch (e) {
     console.error('[APP] Init error:', e);
