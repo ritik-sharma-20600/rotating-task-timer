@@ -1736,12 +1736,7 @@ if (!state.loops || !state.loops['out'] || !state.loops['in-weekday'] || !state.
   saveState(); // Save the corrected structure
 }
 
-console.log('[APP] State updated from cloud:', {
-  tasks: state.tasks.length,
-  loops: Object.keys(state.loops),
-  mode: state.mode,
-  forceWeekend: state.forceWeekend
-});
+
         state.mode = localStorage.getItem('mode') || 'in';
         const forceWeekendStr = localStorage.getItem('forceWeekend');
         state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
@@ -1749,11 +1744,12 @@ console.log('[APP] State updated from cloud:', {
         state.activeTaskAssignmentId = parseFloat(localStorage.getItem('activeTaskAssignmentId')) || null;
         state.activeLoopKey = localStorage.getItem('activeLoopKey') || null;
         
-        console.log('[APP] State updated from cloud:', {
-          tasks: state.tasks.length,
-          mode: state.mode,
-          forceWeekend: state.forceWeekend
-        });
+console.log('[APP] State updated from cloud:', {
+  tasks: state.tasks.length,
+  loops: Object.keys(state.loops),
+  mode: state.mode,
+  forceWeekend: state.forceWeekend
+});
       } catch (e) {
         console.error('[APP] Error parsing cloud data:', e);
       }
