@@ -3,37 +3,37 @@
 // ============================================================================
 // GITHUB GIST SYNC
 // ============================================================================
+
 let GITHUB_TOKEN = localStorage.getItem('github_token') || null;
-const GIST_FILENAME = 'focus-timer-data.json';
-let GIST_ID = localStorage.getItem('gist_id') || null;
-let syncInProgress = false;
-let pendingSync = false;
+
 let syncTimeout = null;
 
 function debouncedSync() {
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
-    syncToGist();
-  }, 2000); // Wait 2 seconds after last change
+    if (GITHUB_TOKEN) {
+      syncToGist();
+    }
+  }, 3000); // Wait 3 seconds after last change
 }
+
+const GIST_FILENAME = 'focus-timer-data.json';
+let GIST_ID = localStorage.getItem('gist_id') || null;
+let syncInProgress = false;
+let pendingSync = false;
+
 
 const storage = {
   save: async (key, data) => {
-    try {
-      localStorage.setItem(key, JSON.stringify(data));
-      
-      // Trigger sync to GitHub
-      if (GITHUB_TOKEN) {
-        debouncedSync(); 
-      } else if (GITHUB_TOKEN) {
-        pendingSync = true;
-      }
-      return true;
-    } catch (e) {
-      console.error('Storage save failed:', e);
-      return false;
-    }
-  },
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+    debouncedSync(); // Don't await
+    return true;
+  } catch (e) {
+    console.error('Storage save failed:', e);
+    return false;
+  }
+},
   
   load: (key, defaultValue) => {
     try {
@@ -260,8 +260,17 @@ function formatDuration(minutes) {
 }
 
 function escapeHtml(text) {
-  const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;', '\n': '\\n'}; // Add \n escape
-  return String(text).replace(/[&<>"'\n]/g, m => map[m]);
+  if (!text) return '';
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+    '\n': '\\n',
+    '\r': ''
+  };
+  return String(text).replace(/[&<>"'\n\r]/g, m => map[m]);
 }
 
 function validateMinutes(value) {
@@ -737,7 +746,7 @@ function updateLoopNote(loopKey, note) {
 // ============================================================================
 // IMPORT/EXPORT
 // ============================================================================
-function exportData() {
+function exportAllData() {
   try {
     if (state.tasks.length === 0) {
       alert('No data to export');
@@ -745,28 +754,31 @@ function exportData() {
     }
     
     const data = {
+      version: 2,
+      exportDate: new Date().toISOString(),
       tasks: state.tasks,
       loops: state.loops,
       mode: state.mode,
-      forceWeekend: state.forceWeekend,
-      version: 1
+      forceWeekend: state.forceWeekend
     };
     
     const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `focus-timer-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `focus-timer-backup-${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 100);
+    
+    alert('✅ Backup exported successfully!');
   } catch (err) {
     alert('Export error: ' + err.message);
   }
 }
 
-function importData() {
+function importAllData() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'application/json';
@@ -780,11 +792,11 @@ function importData() {
         const data = JSON.parse(event.target.result);
         
         if (!data.tasks || !data.loops) {
-          alert('Invalid file format');
+          alert('Invalid backup file format');
           return;
         }
         
-        if (confirm('This will replace ALL current data. Continue?')) {
+        if (confirm('This will replace ALL current data with the backup. Continue?')) {
           stopTimer();
           state.isTimerRunning = false;
           state.tasks = data.tasks;
@@ -793,10 +805,10 @@ function importData() {
           state.forceWeekend = data.forceWeekend || false;
           saveState();
           render();
-          alert('Import successful!');
+          alert('✅ Backup imported successfully!');
         }
       } catch (err) {
-        alert('Error: ' + err.message);
+        alert('Import error: ' + err.message);
       }
     };
     reader.readAsText(file);
@@ -1049,14 +1061,11 @@ function renderManageScreen() {
           loop.assignments.map((a, idx) => renderAssignmentItem(currentLoop, a, idx)).join('')
         }
       </div>
-      
       ${loop.assignments.length > 0 ? 
-        `<div class="loop-actions">
-          <button onclick="resetLoop('${currentLoop}')" class="btn-secondary">Reset All Progress</button>
-          <button onclick="exportData()" class="btn-secondary">Export Data</button>
-          <button onclick="importData()" class="btn-secondary">Import Data</button>
-        </div>` : ''
-      }
+  `<div class="loop-actions">
+    <button onclick="resetLoop('${currentLoop}')" class="btn-secondary">Reset All Progress</button>
+  </div>` : ''
+}
     </div>
   </div>`;
 }
@@ -1087,10 +1096,11 @@ function renderSettingsScreen() {
             </p>
           </div>
           
-          <div style="display: flex; gap: 0.5rem;">
-            <button onclick="forceSyncNow()" class="btn-primary">Sync Now</button>
-            <button onclick="removeToken()" class="btn-danger">Disconnect</button>
-          </div>
+<div style="display: flex; gap: 0.5rem;">
+  <button onclick="forceSyncNow()" class="btn-primary">Sync Now</button>
+  <button onclick="resetSync()" class="btn-warning">Reset Sync</button>
+  <button onclick="removeToken()" class="btn-danger">Disconnect</button>
+</div>
         ` : `
           <div style="padding: 1rem; background: #dc262633; border-radius: 0.5rem; margin-bottom: 1rem;">
             <p style="color: #fca5a5; font-weight: 600;">⚠️ Sync Disabled</p>
@@ -1124,6 +1134,18 @@ function renderSettingsScreen() {
           <strong>Loops:</strong> 3 (Out, In-Weekday, In-Weekend)
         </p>
       </div>
+
+      <div class="form-card">
+        <h3>💾 Backup & Restore</h3>
+        <p style="color: #9ca3af; font-size: 0.875rem; margin-bottom: 1rem;">
+          Download a complete backup of all your data (tasks, loops, progress).
+        </p>
+        <div style="display: flex; gap: 0.5rem;">
+          <button onclick="exportAllData()" class="btn-primary">Export Backup</button>
+          <button onclick="importAllData()" class="btn-secondary">Import Backup</button>
+        </div>
+      </div>
+  
     </div>
   </div>`;
 }
@@ -1160,6 +1182,15 @@ function removeToken() {
     GIST_ID = null;
     alert('✅ Disconnected from cloud sync');
     render();
+  }
+}
+
+function resetSync() {
+  if (confirm('Reset sync connection? This will clear the gist link and create a new one on next save.')) {
+    localStorage.removeItem('gist_id');
+    GIST_ID = null;
+    alert('✅ Sync reset! Next save will create a new gist.');
+    syncToGist();
   }
 }
 
@@ -1436,9 +1467,9 @@ if (state.showSettings) {
 }
     
     const navHtml = `<nav class="bottom-nav">
-  <button class="${state.currentScreen === 'tasks' ? 'active' : ''}" onclick="switchScreen('tasks')">Tasks</button>
-  <button class="${state.currentScreen === 'focus' ? 'active' : ''}" onclick="switchScreen('focus')">Focus</button>
-  <button class="${state.currentScreen === 'manage' ? 'active' : ''}" onclick="switchScreen('manage')">Manage</button>
+  <button class="${!state.showSettings && state.currentScreen === 'tasks' ? 'active' : ''}" onclick="state.showSettings = false; switchScreen('tasks')">Tasks</button>
+  <button class="${!state.showSettings && state.currentScreen === 'focus' ? 'active' : ''}" onclick="state.showSettings = false; switchScreen('focus')">Focus</button>
+  <button class="${!state.showSettings && state.currentScreen === 'manage' ? 'active' : ''}" onclick="state.showSettings = false; switchScreen('manage')">Manage</button>
   <button class="${state.showSettings ? 'active' : ''}" onclick="state.showSettings = !state.showSettings; render()" style="font-size: 1.25rem;">⚙️</button>
 </nav>`;
     
@@ -1478,7 +1509,12 @@ function toggleForceWeekend() {
   stopTimer();
   state.isTimerRunning = false;
   state.forceWeekend = !state.forceWeekend;
-  console.log('[DEBUG] After toggle:', state.forceWeekend);
+  
+  // Reset current index for the new loop
+  const newLoopKey = getActiveLoopKey();
+  state.loops[newLoopKey].currentIndex = 0;
+  
+  console.log('[DEBUG] After toggle:', state.forceWeekend, 'New loop:', newLoopKey);
   saveState();
   render();
 }
