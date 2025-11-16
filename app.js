@@ -4,40 +4,45 @@
 // GITHUB GIST SYNC
 // ============================================================================
 
+// ============================================================================
+// GITHUB GIST SYNC
+// ============================================================================
 let GITHUB_TOKEN = localStorage.getItem('github_token') || null;
-
 let syncTimeout = null;
+let lastSyncTime = 0;
+const MIN_SYNC_INTERVAL = 2000; // Minimum 2 seconds between syncs
 
 function debouncedSync() {
   if (syncTimeout) clearTimeout(syncTimeout);
+  
   syncTimeout = setTimeout(() => {
-    if (GITHUB_TOKEN) {
+    const now = Date.now();
+    const timeSinceLastSync = now - lastSyncTime;
+    
+    if (timeSinceLastSync < MIN_SYNC_INTERVAL) {
+      // Too soon, reschedule
+      syncTimeout = setTimeout(() => debouncedSync(), MIN_SYNC_INTERVAL - timeSinceLastSync);
+      return;
+    }
+    
+    if (GITHUB_TOKEN && !syncInProgress) {
       syncToGist();
     }
-  }, 3000); // Wait 3 seconds after last change
+  }, 1000); // Wait 1 second after last change
 }
-
-const GIST_FILENAME = 'focus-timer-data.json';
-let GIST_ID = localStorage.getItem('gist_id') || null;
-let syncInProgress = false;
-let pendingSync = false;
-
 
 const storage = {
   save: async (key, data) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-// Sync immediately if token exists
-if (GITHUB_TOKEN) {
-  syncToGist().catch(err => console.error('[SYNC] Error:', err));
-}
-return true;
-  } catch (e) {
-    console.error('Storage save failed:', e);
-    return false;
-  }
-},
-  
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+      // Use debounced sync instead of immediate
+      debouncedSync();
+      return true;
+    } catch (e) {
+      console.error('Storage save failed:', e);
+      return false;
+    }
+  },
   load: (key, defaultValue) => {
     try {
       const item = localStorage.getItem(key);
@@ -50,26 +55,34 @@ return true;
 
 async function syncToGist() {
   console.log('[SYNC] syncToGist called, token exists:', !!GITHUB_TOKEN);
+  
   if (!GITHUB_TOKEN) {
     console.log('[SYNC] No GitHub token configured');
     return;
   }
   
+  if (syncInProgress) {
+    console.log('[SYNC] Sync already in progress, skipping');
+    pendingSync = true;
+    return;
+  }
+  
   syncInProgress = true;
+  lastSyncTime = Date.now();
   
   try {
-const data = {
-  masterTasks: localStorage.getItem('masterTasks'),
-  loops: localStorage.getItem('loops'),
-  mode: localStorage.getItem('mode'),
-  forceWeekend: localStorage.getItem('forceWeekend'),
-  timerStartTime: localStorage.getItem('timerStartTime'),
-  activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
-  activeLoopKey: localStorage.getItem('activeLoopKey'),
-  lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
-  syncTime: Date.now()
-};
-    
+    const data = {
+      masterTasks: localStorage.getItem('masterTasks'),
+      loops: localStorage.getItem('loops'),
+      mode: localStorage.getItem('mode'),
+      forceWeekend: localStorage.getItem('forceWeekend'),
+      timerStartTime: localStorage.getItem('timerStartTime'),
+      activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
+      activeLoopKey: localStorage.getItem('activeLoopKey'),
+      lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
+      syncTime: Date.now()
+    };
+
     const gistData = {
       description: 'Focus Timer - Auto Sync',
       public: false,
@@ -79,7 +92,7 @@ const data = {
         }
       }
     };
-    
+
     let response;
     if (GIST_ID) {
       response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
@@ -100,14 +113,15 @@ const data = {
         body: JSON.stringify(gistData)
       });
     }
-    
+
     if (response.ok) {
       const gist = await response.json();
       GIST_ID = gist.id;
       localStorage.setItem('gist_id', GIST_ID);
       console.log('[SYNC] ✅ Synced to GitHub Gist');
     } else {
-      console.error('[SYNC] ❌ Failed:', response.status);
+      const errorText = await response.text();
+      console.error('[SYNC] ❌ Failed:', response.status, errorText);
     }
   } catch (err) {
     console.error('[SYNC] ❌ Error:', err);
@@ -116,7 +130,8 @@ const data = {
     
     if (pendingSync) {
       pendingSync = false;
-      setTimeout(() => syncToGist(), 1000);
+      console.log('[SYNC] Pending sync detected, scheduling...');
+      setTimeout(() => debouncedSync(), 2000);
     }
   }
 }
