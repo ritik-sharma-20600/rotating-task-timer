@@ -120,21 +120,22 @@ async function syncToGist() {
   syncInProgress = true;
   lastSyncTime = Date.now();
   
- const nowISO = new Date().toISOString();
-const nowTimestamp = Date.now();
+  try {
+    const nowISO = new Date().toISOString();
+    const nowTimestamp = Date.now();
 
-const data = {
-  masterTasks: localStorage.getItem('masterTasks'),
-  loops: localStorage.getItem('loops'),
-  mode: localStorage.getItem('mode'),
-  forceWeekend: localStorage.getItem('forceWeekend'),
-  timerStartTime: localStorage.getItem('timerStartTime'),
-  activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
-  activeLoopKey: localStorage.getItem('activeLoopKey'),
-  lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
-  syncTime: nowISO,
-  syncTimestamp: nowTimestamp // Add this for easier comparison
-};
+    const data = {
+      masterTasks: localStorage.getItem('masterTasks'),
+      loops: localStorage.getItem('loops'),
+      mode: localStorage.getItem('mode'),
+      forceWeekend: localStorage.getItem('forceWeekend'),
+      timerStartTime: localStorage.getItem('timerStartTime'),
+      activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
+      activeLoopKey: localStorage.getItem('activeLoopKey'),
+      lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
+      syncTime: nowISO,
+      syncTimestamp: nowTimestamp
+    };
 
     const gistData = {
       description: GIST_DESCRIPTION,
@@ -188,7 +189,7 @@ const data = {
       GIST_ID = gist.id;
       localStorage.setItem('gist_id', GIST_ID);
       localStorage.setItem('lastSyncTime', nowISO);
-localStorage.setItem('lastSyncTimestamp', nowTimestamp.toString());
+      localStorage.setItem('lastSyncTimestamp', nowTimestamp.toString());
       console.log('[SYNC] ✅ SUCCESS! Gist:', GIST_ID);
       console.log('[SYNC] URL:', gist.html_url);
     } else {
