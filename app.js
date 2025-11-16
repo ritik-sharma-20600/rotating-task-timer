@@ -33,7 +33,7 @@ function debouncedSync() {
     if (GITHUB_TOKEN && !syncInProgress) {
       syncToGist();
     }
-  }, 1000);
+  }, 2000); // Increased from 1000 to 2000ms
 }
 
 const storage = {
@@ -252,12 +252,10 @@ async function loadFromGist() {
       if (content) {
         const data = JSON.parse(content);
         
-        // Check if local is empty
         const localIsEmpty = !localStorage.getItem('masterTasks') || 
                              localStorage.getItem('masterTasks') === '[]' ||
                              localStorage.getItem('masterTasks') === 'null';
         
-        // Check if remote has data
         const remoteHasData = data.masterTasks && 
                               data.masterTasks !== 'null' && 
                               data.masterTasks !== '[]';
@@ -265,51 +263,67 @@ async function loadFromGist() {
         console.log('[LOAD] Local empty:', localIsEmpty);
         console.log('[LOAD] Remote has data:', remoteHasData);
         
-// REPLACE all the timestamp comparison logic with:
-const localSyncISO = localStorage.getItem('lastSyncTime') || '1970-01-01T00:00:00.000Z';
-const remoteSyncISO = data.syncTime || '1970-01-01T00:00:00.000Z';
-
-// Use timestamp for comparison (more reliable)
-const localTimestamp = parseInt(localStorage.getItem('lastSyncTimestamp') || '0');
-const remoteTimestamp = data.syncTimestamp || 0;
-
-console.log('[LOAD] Local time:', new Date(localSyncISO).toLocaleString(), '(', localTimestamp, ')');
-console.log('[LOAD] Remote time:', new Date(remoteSyncISO).toLocaleString(), '(', remoteTimestamp, ')');
-
-// Load remote if: local is empty OR remote is newer
-if (remoteHasData && (localIsEmpty || remoteTimestamp > localTimestamp)) {
-  console.log('[LOAD] ✅ Loading cloud data (remote is', remoteTimestamp - localTimestamp, 'ms newer)');
-  Object.keys(data).forEach(key => {
-    if (key !== 'syncTime' && key !== 'syncTimestamp' && key !== 'deviceTime') {
-  // Allow null values to be stored (clears timer state properly)
-  if (data[key] !== undefined) {
-    localStorage.setItem(key, data[key]);
-  }
-}
-  });
-  localStorage.setItem('lastSyncTime', remoteSyncISO);
-  localStorage.setItem('lastSyncTimestamp', remoteTimestamp.toString());
-  return true;
-} else if (remoteHasData && remoteTimestamp === localTimestamp) {
-  // Same timestamp, check content
-  const localTasks = localStorage.getItem('masterTasks');
-  const remoteTasks = data.masterTasks;
-  
-  if (localTasks !== remoteTasks) {
-    console.log('[LOAD] ⚠️ Same timestamp but different content, taking cloud');
-    Object.keys(data).forEach(key => {
-      if (key !== 'syncTime' && key !== 'syncTimestamp' && key !== 'deviceTime' && 
-          data[key] !== null && data[key] !== undefined) {
-        localStorage.setItem(key, data[key]);
-      }
-    });
-    localStorage.setItem('lastSyncTime', remoteSyncISO);
-    localStorage.setItem('lastSyncTimestamp', remoteTimestamp.toString());
-    return true;
-  }
-}
-console.log('[LOAD] ℹ️ Local is current (local:', localTimestamp, 'remote:', remoteTimestamp, ')');
-return false;
+        const localSyncISO = localStorage.getItem('lastSyncTime') || '1970-01-01T00:00:00.000Z';
+        const remoteSyncISO = data.syncTime || '1970-01-01T00:00:00.000Z';
+        
+        const localTimestamp = parseInt(localStorage.getItem('lastSyncTimestamp') || '0');
+        const remoteTimestamp = data.syncTimestamp || 0;
+        
+        console.log('[LOAD] Local time:', new Date(localSyncISO).toLocaleString(), '(', localTimestamp, ')');
+        console.log('[LOAD] Remote time:', new Date(remoteSyncISO).toLocaleString(), '(', remoteTimestamp, ')');
+        
+        // Load remote if: local is empty OR remote is newer OR same time but different content
+        if (remoteHasData && (localIsEmpty || remoteTimestamp > localTimestamp)) {
+          console.log('[LOAD] ✅ Loading cloud data (remote is', remoteTimestamp - localTimestamp, 'ms newer)');
+          
+          // CRITICAL: Cancel any pending debounced syncs before loading
+          if (syncTimeout) {
+            console.log('[LOAD] ⚠️ Cancelling pending sync to prevent race condition');
+            clearTimeout(syncTimeout);
+            syncTimeout = null;
+          }
+          
+          Object.keys(data).forEach(key => {
+            if (key !== 'syncTime' && key !== 'syncTimestamp' && key !== 'deviceTime') {
+              if (data[key] !== undefined) {
+                localStorage.setItem(key, data[key]);
+              }
+            }
+          });
+          localStorage.setItem('lastSyncTime', remoteSyncISO);
+          localStorage.setItem('lastSyncTimestamp', remoteTimestamp.toString());
+          return true;
+          
+        } else if (remoteHasData && remoteTimestamp === localTimestamp) {
+          // Same timestamp, check content
+          const localTasks = localStorage.getItem('masterTasks');
+          const remoteTasks = data.masterTasks;
+          
+          if (localTasks !== remoteTasks) {
+            console.log('[LOAD] ⚠️ Same timestamp but different content, taking cloud');
+            
+            // CRITICAL: Cancel any pending debounced syncs
+            if (syncTimeout) {
+              console.log('[LOAD] ⚠️ Cancelling pending sync to prevent race condition');
+              clearTimeout(syncTimeout);
+              syncTimeout = null;
+            }
+            
+            Object.keys(data).forEach(key => {
+              if (key !== 'syncTime' && key !== 'syncTimestamp' && key !== 'deviceTime') {
+                if (data[key] !== undefined) {
+                  localStorage.setItem(key, data[key]);
+                }
+              }
+            });
+            localStorage.setItem('lastSyncTime', remoteSyncISO);
+            localStorage.setItem('lastSyncTimestamp', remoteTimestamp.toString());
+            return true;
+          }
+        }
+        
+        console.log('[LOAD] ℹ️ Local is current (local:', localTimestamp, 'remote:', remoteTimestamp, ')');
+        return false;
       }
     } else if (response.status === 404) {
       console.log('[LOAD] Gist not found');
@@ -322,7 +336,6 @@ return false;
   
   return false;
 }
-
 // Emergency sync before page close
 // Emergency sync before page close
 window.addEventListener('beforeunload', (event) => {
