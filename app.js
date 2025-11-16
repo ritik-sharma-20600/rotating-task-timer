@@ -1696,47 +1696,44 @@ document.addEventListener('visibilitychange', () => {
     // CRITICAL: Load from cloud FIRST, before anything else
     console.log('[APP] Loading from cloud...');
     const loadedFromCloud = await loadFromGist();
-
-    if (loadedFromCloud) {
-  console.log('[APP] ✅ Loaded from cloud, updating state...');
-  
-  // DEBUG: Log what's in localStorage
-  console.log('[DEBUG] Raw localStorage data:', {
-    masterTasks: localStorage.getItem('masterTasks'),
-    loops: localStorage.getItem('loops'),
-    mode: localStorage.getItem('mode')
-  });
     
     if (loadedFromCloud) {
       console.log('[APP] ✅ Loaded from cloud, updating state...');
       
+      // DEBUG: Log what's in localStorage
+      console.log('[DEBUG] Raw localStorage data:', {
+        masterTasks: localStorage.getItem('masterTasks'),
+        loops: localStorage.getItem('loops'),
+        mode: localStorage.getItem('mode')
+      });
+      
       // Parse the data that was just written to localStorage
       try {
         state.tasks = JSON.parse(localStorage.getItem('masterTasks') || '[]');
+        
         const loopsData = localStorage.getItem('loops');
-if (loopsData && loopsData !== 'null') {
-  try {
-    state.loops = JSON.parse(loopsData);
-  } catch (e) {
-    console.error('[APP] Error parsing loops:', e);
-    state.loops = null;
-  }
-} else {
-  state.loops = null;
-}
-
-// Validate loops structure
-if (!state.loops || !state.loops['out'] || !state.loops['in-weekday'] || !state.loops['in-weekend']) {
-  console.warn('[APP] Invalid loops data, resetting to default');
-  state.loops = {
-    'out': { note: '', assignments: [], currentIndex: 0 },
-    'in-weekday': { note: '', assignments: [], currentIndex: 0 },
-    'in-weekend': { note: '', assignments: [], currentIndex: 0 }
-  };
-  saveState(); // Save the corrected structure
-}
-
-
+        if (loopsData && loopsData !== 'null') {
+          try {
+            state.loops = JSON.parse(loopsData);
+          } catch (e) {
+            console.error('[APP] Error parsing loops:', e);
+            state.loops = null;
+          }
+        } else {
+          state.loops = null;
+        }
+        
+        // Validate loops structure
+        if (!state.loops || !state.loops['out'] || !state.loops['in-weekday'] || !state.loops['in-weekend']) {
+          console.warn('[APP] Invalid loops data, resetting to default');
+          state.loops = {
+            'out': { note: '', assignments: [], currentIndex: 0 },
+            'in-weekday': { note: '', assignments: [], currentIndex: 0 },
+            'in-weekend': { note: '', assignments: [], currentIndex: 0 }
+          };
+          saveState(); // Save the corrected structure
+        }
+        
         state.mode = localStorage.getItem('mode') || 'in';
         const forceWeekendStr = localStorage.getItem('forceWeekend');
         state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
@@ -1744,12 +1741,12 @@ if (!state.loops || !state.loops['out'] || !state.loops['in-weekday'] || !state.
         state.activeTaskAssignmentId = parseFloat(localStorage.getItem('activeTaskAssignmentId')) || null;
         state.activeLoopKey = localStorage.getItem('activeLoopKey') || null;
         
-console.log('[APP] State updated from cloud:', {
-  tasks: state.tasks.length,
-  loops: Object.keys(state.loops),
-  mode: state.mode,
-  forceWeekend: state.forceWeekend
-});
+        console.log('[APP] State updated from cloud:', {
+          tasks: state.tasks.length,
+          loops: Object.keys(state.loops),
+          mode: state.mode,
+          forceWeekend: state.forceWeekend
+        });
       } catch (e) {
         console.error('[APP] Error parsing cloud data:', e);
       }
