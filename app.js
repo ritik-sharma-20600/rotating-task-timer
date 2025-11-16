@@ -1,9 +1,4 @@
 'use strict';
-
-// ============================================================================
-// GITHUB GIST SYNC
-// ============================================================================
-
 // ============================================================================
 // GITHUB GIST SYNC
 // ============================================================================
@@ -11,6 +6,11 @@ let GITHUB_TOKEN = localStorage.getItem('github_token') || null;
 let syncTimeout = null;
 let lastSyncTime = 0;
 const MIN_SYNC_INTERVAL = 2000; // Minimum 2 seconds between syncs
+
+const GIST_FILENAME = 'focus-timer-data.json';
+let GIST_ID = localStorage.getItem('gist_id') || null;
+let syncInProgress = false;
+let pendingSync = false;
 
 function debouncedSync() {
   if (syncTimeout) clearTimeout(syncTimeout);
