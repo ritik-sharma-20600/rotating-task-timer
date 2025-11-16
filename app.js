@@ -1778,12 +1778,13 @@ async function switchScreen(screen) {
     state.managingLoopKey = getActiveLoopKey();
   }
   
-  // Check for cloud updates when switching screens
+  // ONLY load from cloud on tab switch, DON'T sync
+  // User changes will sync automatically via debouncedSync after 1 second
   if (GITHUB_TOKEN && !syncInProgress) {
-    console.log('[APP] Screen switch, checking for updates...');
+    console.log('[APP] Tab switch → checking cloud...');
     const loaded = await loadFromGist();
     if (loaded) {
-      console.log('[APP] ✅ Loaded updates on screen switch');
+      console.log('[APP] ✅ Cloud data loaded');
       // Reload state
       state.tasks = storage.load('masterTasks', []);
       state.loops = storage.load('loops', {
@@ -1794,6 +1795,8 @@ async function switchScreen(screen) {
       state.mode = storage.load('mode', 'in');
       const forceWeekendStr = localStorage.getItem('forceWeekend');
       state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
+    } else {
+      console.log('[APP] Local data is current');
     }
   }
   
@@ -1950,14 +1953,13 @@ function setupDragAndDrop() {
 // ============================================================================
 document.addEventListener('visibilitychange', async () => {
   if (!document.hidden) {
-    console.log('[APP] Tab visible, checking for updates...');
+    console.log('[APP] Tab visible → checking cloud...');
     
-    // Check cloud for updates
+    // ONLY load from cloud, don't sync
     if (GITHUB_TOKEN) {
       const loaded = await loadFromGist();
       if (loaded) {
-        console.log('[APP] ✅ Loaded updates from cloud');
-        // Reload state from localStorage
+        console.log('[APP] ✅ Cloud data loaded');
         state.tasks = storage.load('masterTasks', []);
         state.loops = storage.load('loops', {
           'out': { note: '', assignments: [], currentIndex: 0 },
@@ -1967,6 +1969,7 @@ document.addEventListener('visibilitychange', async () => {
         state.mode = storage.load('mode', 'in');
         const forceWeekendStr = localStorage.getItem('forceWeekend');
         state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
+        render();
       }
     }
     
@@ -1984,14 +1987,13 @@ document.addEventListener('visibilitychange', async () => {
     }
   }
 });
-
 // Add this AFTER the visibilitychange handler:
 window.addEventListener('focus', async () => {
   if (GITHUB_TOKEN && !syncInProgress) {
-    console.log('[APP] Window focused, checking for updates...');
+    console.log('[APP] Window focused → checking cloud...');
     const loaded = await loadFromGist();
     if (loaded) {
-      console.log('[APP] ✅ Updates loaded');
+      console.log('[APP] ✅ Cloud data loaded');
       state.tasks = storage.load('masterTasks', []);
       state.loops = storage.load('loops', {
         'out': { note: '', assignments: [], currentIndex: 0 },
@@ -2105,34 +2107,6 @@ window.addEventListener('focus', async () => {
     
     // Periodic sync every 30 seconds
 // Around line 1810, CHANGE interval to 15 seconds:
-setInterval(async () => {
-  if (!syncInProgress && !pendingSync && GITHUB_TOKEN && !document.hidden) {
-    const loaded = await loadFromGist();
-    if (loaded) {
-      console.log('[APP] 🔄 Auto-sync: Updates loaded');
-      state.tasks = storage.load('masterTasks', []);
-      state.loops = storage.load('loops', {
-        'out': { note: '', assignments: [], currentIndex: 0 },
-        'in-weekday': { note: '', assignments: [], currentIndex: 0 },
-        'in-weekend': { note: '', assignments: [], currentIndex: 0 }
-      });
-      state.mode = storage.load('mode', 'in');
-      const forceWeekendStr = localStorage.getItem('forceWeekend');
-      state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
-      
-      // Show quick toast notification
-      const toast = document.createElement('div');
-      toast.textContent = '🔄 Synced';
-      toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#16a34a;color:white;padding:0.75rem 1rem;border-radius:0.5rem;z-index:9999;font-size:0.875rem;box-shadow:0 4px 6px rgba(0,0,0,0.3);';
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 2000);
-      
-      render();
-    }
-    
-    debouncedSync();
-  }
-}, 30000); // ✅ 15 seconds
     
   } catch (e) {
     console.error('[APP] Init error:', e);
