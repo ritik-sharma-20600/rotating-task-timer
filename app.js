@@ -27,8 +27,11 @@ const storage = {
   save: async (key, data) => {
   try {
     localStorage.setItem(key, JSON.stringify(data));
-    debouncedSync(); // Don't await
-    return true;
+// Sync immediately if token exists
+if (GITHUB_TOKEN) {
+  syncToGist().catch(err => console.error('[SYNC] Error:', err));
+}
+return true;
   } catch (e) {
     console.error('Storage save failed:', e);
     return false;
@@ -46,6 +49,7 @@ const storage = {
 };
 
 async function syncToGist() {
+  console.log('[SYNC] syncToGist called, token exists:', !!GITHUB_TOKEN);
   if (!GITHUB_TOKEN) {
     console.log('[SYNC] No GitHub token configured');
     return;
@@ -1126,6 +1130,7 @@ function renderSettingsScreen() {
   <button onclick="forceSyncNow()" class="btn-primary">Sync Now</button>
   <button onclick="resetSync()" class="btn-warning">Reset Sync</button>
   <button onclick="removeToken()" class="btn-danger">Disconnect</button>
+  <button onclick="testSyncNow()" class="btn-primary" style="width: 100%;">TEST: Force Sync Now</button>
 </div>
         ` : `
           <div style="padding: 1rem; background: #dc262633; border-radius: 0.5rem; margin-bottom: 1rem;">
@@ -1573,6 +1578,24 @@ function hideTooltip() {
   if (tooltip) tooltip.style.display = 'none';
 }
 
+async function testSyncNow() {
+  console.log('[TEST] Forcing sync...');
+  console.log('[TEST] GITHUB_TOKEN:', GITHUB_TOKEN ? 'EXISTS' : 'MISSING');
+  console.log('[TEST] GIST_ID:', GIST_ID || 'None');
+  
+  if (!GITHUB_TOKEN) {
+    alert('No token!');
+    return;
+  }
+  
+  try {
+    await syncToGist();
+    alert('Sync attempt complete. Check console for details.');
+  } catch (err) {
+    alert('Sync error: ' + err.message);
+  }
+}
+
 function setupDragAndDrop() {
   const list = document.getElementById('assignments-list');
   if (!list) return;
@@ -1680,12 +1703,14 @@ document.addEventListener('visibilitychange', () => {
         console.log('[APP] Wake lock acquired');
         
         wakeLock.addEventListener('release', async () => {
-          try {
-            await navigator.wakeLock.request('screen');
-          } catch (e) {
-            console.log('[APP] Could not re-acquire wake lock:', e);
-          }
-        });
+  if (!document.hidden) { // Only re-acquire if tab is visible
+    try {
+      await navigator.wakeLock.request('screen');
+    } catch (e) {
+      // Tab is hidden, that's fine
+    }
+  }
+});
       } catch (err) {
         console.log('[APP] Wake lock not available:', err);
       }
