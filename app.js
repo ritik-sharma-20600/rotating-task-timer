@@ -222,7 +222,6 @@ async function loadFromGist() {
   }
   
   try {
-    // If no GIST_ID, search for existing gist
     if (!GIST_ID) {
       console.log('[LOAD] No GIST_ID, searching...');
       GIST_ID = await findExistingGist();
@@ -260,25 +259,19 @@ async function loadFromGist() {
                               data.masterTasks !== 'null' && 
                               data.masterTasks !== '[]';
         
-        console.log('[LOAD] Local empty:', localIsEmpty);
-        console.log('[LOAD] Remote has data:', remoteHasData);
-        
-        const localSyncISO = localStorage.getItem('lastSyncTime') || '1970-01-01T00:00:00.000Z';
-        const remoteSyncISO = data.syncTime || '1970-01-01T00:00:00.000Z';
-        
         const localTimestamp = parseInt(localStorage.getItem('lastSyncTimestamp') || '0');
         const remoteTimestamp = data.syncTimestamp || 0;
         
-        console.log('[LOAD] Local time:', new Date(localSyncISO).toLocaleString(), '(', localTimestamp, ')');
-        console.log('[LOAD] Remote time:', new Date(remoteSyncISO).toLocaleString(), '(', remoteTimestamp, ')');
+        console.log('[LOAD] Local:', new Date(localTimestamp).toLocaleString(), '(', localTimestamp, ')');
+        console.log('[LOAD] Remote:', new Date(remoteTimestamp).toLocaleString(), '(', remoteTimestamp, ')');
         
-        // Load remote if: local is empty OR remote is newer OR same time but different content
+        // Only load if remote is ACTUALLY newer or local is empty
         if (remoteHasData && (localIsEmpty || remoteTimestamp > localTimestamp)) {
-          console.log('[LOAD] ✅ Loading cloud data (remote is', remoteTimestamp - localTimestamp, 'ms newer)');
+          console.log('[LOAD] ✅ Remote is newer, loading');
           
-          // CRITICAL: Cancel any pending debounced syncs before loading
+          // Cancel pending sync since we're loading newer data
           if (syncTimeout) {
-            console.log('[LOAD] ⚠️ Cancelling pending sync to prevent race condition');
+            console.log('[LOAD] Cancelling stale sync');
             clearTimeout(syncTimeout);
             syncTimeout = null;
           }
@@ -290,39 +283,14 @@ async function loadFromGist() {
               }
             }
           });
-          localStorage.setItem('lastSyncTime', remoteSyncISO);
+          localStorage.setItem('lastSyncTime', data.syncTime);
           localStorage.setItem('lastSyncTimestamp', remoteTimestamp.toString());
           return true;
-          
-        } else if (remoteHasData && remoteTimestamp === localTimestamp) {
-          // Same timestamp, check content
-          const localTasks = localStorage.getItem('masterTasks');
-          const remoteTasks = data.masterTasks;
-          
-          if (localTasks !== remoteTasks) {
-            console.log('[LOAD] ⚠️ Same timestamp but different content, taking cloud');
-            
-            // CRITICAL: Cancel any pending debounced syncs
-            if (syncTimeout) {
-              console.log('[LOAD] ⚠️ Cancelling pending sync to prevent race condition');
-              clearTimeout(syncTimeout);
-              syncTimeout = null;
-            }
-            
-            Object.keys(data).forEach(key => {
-              if (key !== 'syncTime' && key !== 'syncTimestamp' && key !== 'deviceTime') {
-                if (data[key] !== undefined) {
-                  localStorage.setItem(key, data[key]);
-                }
-              }
-            });
-            localStorage.setItem('lastSyncTime', remoteSyncISO);
-            localStorage.setItem('lastSyncTimestamp', remoteTimestamp.toString());
-            return true;
-          }
         }
         
-        console.log('[LOAD] ℹ️ Local is current (local:', localTimestamp, 'remote:', remoteTimestamp, ')');
+        // If timestamps are equal, DON'T load from cloud
+        // Local might have unsaved changes
+        console.log('[LOAD] ℹ️ Local is current or newer, keeping local data');
         return false;
       }
     } else if (response.status === 404) {
