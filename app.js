@@ -218,10 +218,13 @@ function getActiveLoopKey() {
   if (state.mode === 'out') return 'out';
   
   const now = new Date();
-  const day = now.getDay(); // 0 = Sunday, 6 = Saturday
-  const isWeekend = day === 0 || day === 6;
+  const day = now.getDay();
+  const isActuallyWeekend = day === 0 || day === 6;
   
-  return (state.forceWeekend || isWeekend) ? 'in-weekend' : 'in-weekday';
+  // Manual override takes precedence
+  const useWeekend = state.forceWeekend !== null ? state.forceWeekend : isActuallyWeekend;
+  
+  return useWeekend ? 'in-weekend' : 'in-weekday';
 }
 
 function getActiveLoop() {
@@ -868,17 +871,25 @@ function renderFocusScreen() {
     <div class="focus-container">
       <div class="mode-controls">
         <div class="toggle-group">
-          <label class="toggle-label" onmousedown="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")})" 
-                 onmouseup="hideTooltip()" ontouchstart="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', true)" 
-                 ontouchend="hideTooltip()">Mode</label>
+          <label class="toggle-label" 
+       onmouseover="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', false)" 
+       onmouseout="hideTooltip()"
+       onmousedown="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', false)" 
+       onmouseup="hideTooltip()" 
+       ontouchstart="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', true)" 
+       ontouchend="hideTooltip()">Mode</label>
           <div class="toggle ${state.mode === 'in' ? 'active-right' : 'active-left'}" onclick="toggleMode()">
             <span>Out</span><span>In</span>
           </div>
         </div>
         <div class="toggle-group ${state.mode === 'out' ? 'disabled' : ''}">
-          <label class="toggle-label" onmousedown="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")})" 
-                 onmouseup="hideTooltip()" ontouchstart="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', true)" 
-                 ontouchend="hideTooltip()">Day Type</label>
+<label class="toggle-label" 
+       onmouseover="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', false)" 
+       onmouseout="hideTooltip()"
+       onmousedown="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', false)" 
+       onmouseup="hideTooltip()" 
+       ontouchstart="showTooltip(event, '${escapeHtml(loopNote).replace(/'/g, "\\'")}', true)" 
+       ontouchend="hideTooltip()">Day Type</label>
           <div class="toggle small ${state.forceWeekend || (state.mode === 'in' && loopKey === 'in-weekend') ? 'active-right' : 'active-left'}" 
                onclick="${state.mode === 'out' ? '' : 'toggleForceWeekend()'}">
             <span>Weekday</span><span>Weekend</span>
@@ -1505,16 +1516,20 @@ function toggleMode() {
 function toggleForceWeekend() {
   if (state.mode === 'out') return;
   
-  console.log('[DEBUG] Before toggle:', state.forceWeekend);
+  const currentLoop = getActiveLoopKey();
+  const isCurrentlyWeekend = currentLoop === 'in-weekend';
+  
+  // Toggle to opposite
+  state.forceWeekend = !isCurrentlyWeekend;
+  
+  console.log('[DEBUG] Toggling from', currentLoop, 'to', getActiveLoopKey());
+  
   stopTimer();
   state.isTimerRunning = false;
-  state.forceWeekend = !state.forceWeekend;
   
-  // Reset current index for the new loop
   const newLoopKey = getActiveLoopKey();
   state.loops[newLoopKey].currentIndex = 0;
   
-  console.log('[DEBUG] After toggle:', state.forceWeekend, 'New loop:', newLoopKey);
   saveState();
   render();
 }
@@ -1664,18 +1679,19 @@ document.addEventListener('visibilitychange', () => {
     await registerSW();
     
     // Load from GitHub Gist first
-    const loadedFromCloud = await loadFromGist();
-    
-    if (loadedFromCloud) {
-  console.log('[APP] ✅ Loaded from cloud, reinitializing state');
-  state.tasks = storage.load('masterTasks', []);
-  state.loops = storage.load('loops', {
+const loadedFromCloud = await loadFromGist();
+
+if (loadedFromCloud) {
+  console.log('[APP] ✅ Loaded from cloud, reloading state from storage');
+  // Reload state from localStorage (which was just updated by loadFromGist)
+  state.tasks = JSON.parse(localStorage.getItem('masterTasks')) || [];
+  state.loops = JSON.parse(localStorage.getItem('loops')) || {
     'out': { note: '', assignments: [], currentIndex: 0 },
     'in-weekday': { note: '', assignments: [], currentIndex: 0 },
     'in-weekend': { note: '', assignments: [], currentIndex: 0 }
-  });
-  state.mode = storage.load('mode', 'in');
-  state.forceWeekend = storage.load('forceWeekend', false);
+  };
+  state.mode = localStorage.getItem('mode') || 'in';
+  state.forceWeekend = localStorage.getItem('forceWeekend') === 'true';
 }
     
     checkTimerOnLoad();
