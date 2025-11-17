@@ -259,13 +259,26 @@ async function loadFromGist() {
           return false;
         }
         
-        // Remote is different and local hasn't changed since last sync
+        // Check timestamps to determine which is newer
         const localTimestamp = parseInt(localStorage.getItem('lastSyncTimestamp') || '0');
         const remoteTimestamp = remoteData.syncTimestamp || 0;
+        const timeSinceLocalSync = Date.now() - localTimestamp;
         
         console.log('[LOAD] Local timestamp:', new Date(localTimestamp).toLocaleString());
         console.log('[LOAD] Remote timestamp:', new Date(remoteTimestamp).toLocaleString());
+        console.log('[LOAD] Time since local sync:', Math.round(timeSinceLocalSync / 1000), 'seconds');
         
+        // CRITICAL FIX: Last Write Wins with recency check
+        // If local synced very recently (within 5 seconds), it should win even if remote is "newer"
+        // This handles the case where PC deletes, syncs, then loads before phone syncs
+        if (timeSinceLocalSync < 5000 && localHash !== remoteHash) {
+          console.log('[LOAD] ⚠️ Local synced very recently (< 5s), keeping local (Last Write Wins)');
+          console.log('[LOAD] 💡 Will sync local changes to cloud');
+          setTimeout(() => syncToGist(), 100);
+          return false;
+        }
+        
+        // Normal timestamp comparison
         if (remoteTimestamp > localTimestamp) {
           console.log('[LOAD] ✅ Remote is newer, loading');
           loadDataFromSnapshot(remoteData);
@@ -430,7 +443,6 @@ window.addEventListener('beforeunload', (event) => {
     }
   }
 });
-
 // ============================================================================
 // STATE
 // ============================================================================
