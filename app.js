@@ -1,105 +1,66 @@
+// ============================================================================
+// COMPLETE SYNC OVERHAUL - Replace entire sync section in app.js
+// ============================================================================
+
+// Replace from line 1 to line 370 (entire sync section) with this:
+
 'use strict';
 // ============================================================================
-// GITHUB GIST SYNC
+// GITHUB GIST SYNC - NEW ARCHITECTURE
 // ============================================================================
 let GITHUB_TOKEN = localStorage.getItem('github_token') || null;
-let syncTimeout = null;
 let lastSyncTime = 0;
-const MIN_SYNC_INTERVAL = 2000;
+const MIN_SYNC_INTERVAL = 2000; // Rate limit: 2 seconds between syncs
 
-// At the top with other constants
 const GIST_FILENAME = 'focus-timer-data.json';
 const GIST_DESCRIPTION = 'Focus Timer App Data - DO NOT DELETE';
-
-// ✅ ADD THIS: Allow manual GIST_ID override
-const MANUAL_GIST_ID = '69fbd5c11c0ed33f21f29c16b61f5f23'; // Set to 'your-gist-id-here' if you want to force a specific gist
+const MANUAL_GIST_ID = '69fbd5c11c0ed33f21f29c16b61f5f23';
 
 let GIST_ID = MANUAL_GIST_ID || localStorage.getItem('gist_id') || null;
 let syncInProgress = false;
-let pendingSync = false;
 
-function debouncedSync() {
-  if (syncTimeout) clearTimeout(syncTimeout);
-  
-  syncTimeout = setTimeout(() => {
-    const now = Date.now();
-    const timeSinceLastSync = now - lastSyncTime;
-    
-    if (timeSinceLastSync < MIN_SYNC_INTERVAL) {
-      syncTimeout = setTimeout(() => debouncedSync(), MIN_SYNC_INTERVAL - timeSinceLastSync);
-      return;
-    }
-    
-    if (GITHUB_TOKEN && !syncInProgress) {
-      syncToGist();
-    }
-  }, 2000); // Increased from 1000 to 2000ms
+// NEW: Simple hash function for content comparison
+function hashContent(content) {
+  let hash = 0;
+  const str = JSON.stringify(content);
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString(36);
 }
 
-const storage = {
-  save: async (key, data) => {
-    try {
-      localStorage.setItem(key, JSON.stringify(data));
-      debouncedSync();
-      return true;
-    } catch (e) {
-      console.error('[STORAGE] Save failed:', e);
-      return false;
-    }
-  },
-  load: (key, defaultValue) => {
-    try {
-      const item = localStorage.getItem(key);
-      return item ? JSON.parse(item) : defaultValue;
-    } catch (e) {
-      console.error('[STORAGE] Load failed:', e);
-      return defaultValue;
-    }
-  }
-};
-
-// Find existing gist by description
-async function findExistingGist() {
-  if (MANUAL_GIST_ID) {
-    console.log('[SYNC] Using manual GIST_ID:', MANUAL_GIST_ID);
-    return MANUAL_GIST_ID;
-  }
-  if (!GITHUB_TOKEN) return null;
-  
-  try {
-    console.log('[SYNC] 🔍 Searching for existing gist...');
-    const response = await fetch('https://api.github.com/gists', {
-      headers: {
-        'Authorization': `Bearer ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json'
-      }
-    });
-    
-    if (response.ok) {
-      const gists = await response.json();
-      const found = gists.find(g => g.description === GIST_DESCRIPTION);
-      
-      if (found) {
-        console.log('[SYNC] ✅ Found existing gist:', found.id);
-        return found.id;
-      }
-    }
-    
-    console.log('[SYNC] No existing gist found');
-    return null;
-  } catch (err) {
-    console.error('[SYNC] Error finding gist:', err);
-    return null;
-  }
+// NEW: Get current data snapshot
+function getCurrentDataSnapshot() {
+  return {
+    masterTasks: localStorage.getItem('masterTasks'),
+    loops: localStorage.getItem('loops'),
+    mode: localStorage.getItem('mode'),
+    forceWeekend: localStorage.getItem('forceWeekend'),
+    timerStartTime: localStorage.getItem('timerStartTime'),
+    activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
+    activeLoopKey: localStorage.getItem('activeLoopKey'),
+    lastMidnightCheck: localStorage.getItem('lastMidnightCheck')
+  };
 }
 
+// NEW: Immediate sync with rate limiting
 async function syncToGist() {
   console.log('[SYNC] ========== SYNC START ==========');
   console.log('[SYNC] Token exists:', !!GITHUB_TOKEN);
   
   if (!GITHUB_TOKEN) {
     console.log('[SYNC] No token');
-    return;
+    return false;
+  }
+  
+  // Rate limiting check
+  const now = Date.now();
+  const timeSinceLastSync = now - lastSyncTime;
+  if (timeSinceLastSync < MIN_SYNC_INTERVAL) {
+    console.log('[SYNC] ⏱️ Rate limited, too soon since last sync');
+    return false;
   }
   
   // Don't sync empty data
@@ -108,33 +69,30 @@ async function syncToGist() {
   
   if (!hasData) {
     console.log('[SYNC] ⚠️ No local data, skipping sync');
-    return;
+    return false;
   }
   
   if (syncInProgress) {
     console.log('[SYNC] Already in progress');
-    pendingSync = true;
-    return;
+    return false;
   }
   
   syncInProgress = true;
-  lastSyncTime = Date.now();
+  lastSyncTime = now;
   
   try {
     const nowISO = new Date().toISOString();
     const nowTimestamp = Date.now();
+    
+    // Get current data snapshot
+    const dataSnapshot = getCurrentDataSnapshot();
+    const contentHash = hashContent(dataSnapshot);
 
     const data = {
-      masterTasks: localStorage.getItem('masterTasks'),
-      loops: localStorage.getItem('loops'),
-      mode: localStorage.getItem('mode'),
-      forceWeekend: localStorage.getItem('forceWeekend'),
-      timerStartTime: localStorage.getItem('timerStartTime'),
-      activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
-      activeLoopKey: localStorage.getItem('activeLoopKey'),
-      lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
+      ...dataSnapshot,
       syncTime: nowISO,
-      syncTimestamp: nowTimestamp
+      syncTimestamp: nowTimestamp,
+      contentHash: contentHash // NEW: Store hash for conflict detection
     };
 
     const gistData = {
@@ -190,8 +148,10 @@ async function syncToGist() {
       localStorage.setItem('gist_id', GIST_ID);
       localStorage.setItem('lastSyncTime', nowISO);
       localStorage.setItem('lastSyncTimestamp', nowTimestamp.toString());
+      localStorage.setItem('lastContentHash', contentHash); // NEW: Store last synced hash
       console.log('[SYNC] ✅ SUCCESS! Gist:', GIST_ID);
-      console.log('[SYNC] URL:', gist.html_url);
+      console.log('[SYNC] Hash:', contentHash);
+      return true;
     } else {
       const errorText = await response.text();
       console.error('[SYNC] ❌ Failed:', response.status, errorText);
@@ -201,20 +161,18 @@ async function syncToGist() {
         GIST_ID = null;
         localStorage.removeItem('gist_id');
       }
+      return false;
     }
   } catch (err) {
     console.error('[SYNC] ❌ Error:', err);
+    return false;
   } finally {
     syncInProgress = false;
     console.log('[SYNC] ========== SYNC END ==========\n');
-    
-    if (pendingSync) {
-      pendingSync = false;
-      setTimeout(() => debouncedSync(), 2000);
-    }
   }
 }
 
+// NEW: Smart load with hash-based conflict detection
 async function loadFromGist() {
   if (!GITHUB_TOKEN) {
     console.log('[LOAD] No token');
@@ -249,49 +207,73 @@ async function loadFromGist() {
       const content = gist.files[GIST_FILENAME]?.content;
       
       if (content) {
-        const data = JSON.parse(content);
+        const remoteData = JSON.parse(content);
         
         const localIsEmpty = !localStorage.getItem('masterTasks') || 
                              localStorage.getItem('masterTasks') === '[]' ||
                              localStorage.getItem('masterTasks') === 'null';
         
-        const remoteHasData = data.masterTasks && 
-                              data.masterTasks !== 'null' && 
-                              data.masterTasks !== '[]';
+        const remoteHasData = remoteData.masterTasks && 
+                              remoteData.masterTasks !== 'null' && 
+                              remoteData.masterTasks !== '[]';
         
-        const localTimestamp = parseInt(localStorage.getItem('lastSyncTimestamp') || '0');
-        const remoteTimestamp = data.syncTimestamp || 0;
-        
-        console.log('[LOAD] Local:', new Date(localTimestamp).toLocaleString(), '(', localTimestamp, ')');
-        console.log('[LOAD] Remote:', new Date(remoteTimestamp).toLocaleString(), '(', remoteTimestamp, ')');
-        
-        // Only load if remote is ACTUALLY newer or local is empty
-        if (remoteHasData && (localIsEmpty || remoteTimestamp > localTimestamp)) {
-          console.log('[LOAD] ✅ Remote is newer, loading');
-          
-          // Cancel pending sync since we're loading newer data
-          if (syncTimeout) {
-            console.log('[LOAD] Cancelling stale sync');
-            clearTimeout(syncTimeout);
-            syncTimeout = null;
-          }
-          
-          Object.keys(data).forEach(key => {
-            if (key !== 'syncTime' && key !== 'syncTimestamp' && key !== 'deviceTime') {
-              if (data[key] !== undefined) {
-                localStorage.setItem(key, data[key]);
-              }
-            }
-          });
-          localStorage.setItem('lastSyncTime', data.syncTime);
-          localStorage.setItem('lastSyncTimestamp', remoteTimestamp.toString());
+        // If local is empty, always load from cloud
+        if (localIsEmpty && remoteHasData) {
+          console.log('[LOAD] ✅ Local is empty, loading from cloud');
+          loadDataFromSnapshot(remoteData);
           return true;
         }
         
-        // If timestamps are equal, DON'T load from cloud
-        // Local might have unsaved changes
-        console.log('[LOAD] ℹ️ Local is current or newer, keeping local data');
-        return false;
+        // NEW: Hash-based comparison
+        const localSnapshot = getCurrentDataSnapshot();
+        const localHash = hashContent(localSnapshot);
+        const remoteHash = remoteData.contentHash || hashContent({
+          masterTasks: remoteData.masterTasks,
+          loops: remoteData.loops,
+          mode: remoteData.mode,
+          forceWeekend: remoteData.forceWeekend,
+          timerStartTime: remoteData.timerStartTime,
+          activeTaskAssignmentId: remoteData.activeTaskAssignmentId,
+          activeLoopKey: remoteData.activeLoopKey,
+          lastMidnightCheck: remoteData.lastMidnightCheck
+        });
+        
+        const lastSyncedHash = localStorage.getItem('lastContentHash');
+        
+        console.log('[LOAD] Local hash:', localHash);
+        console.log('[LOAD] Remote hash:', remoteHash);
+        console.log('[LOAD] Last synced hash:', lastSyncedHash);
+        
+        // If hashes match, no need to load
+        if (localHash === remoteHash) {
+          console.log('[LOAD] ✅ Content identical (hash match), no action needed');
+          return false;
+        }
+        
+        // If local has changes since last sync, don't overwrite
+        if (lastSyncedHash && localHash !== lastSyncedHash) {
+          console.log('[LOAD] ⚠️ Local has unsaved changes, skipping cloud load');
+          console.log('[LOAD] 💡 Will sync local changes to cloud');
+          // Trigger immediate sync of local changes
+          setTimeout(() => syncToGist(), 100);
+          return false;
+        }
+        
+        // Remote is different and local hasn't changed since last sync
+        const localTimestamp = parseInt(localStorage.getItem('lastSyncTimestamp') || '0');
+        const remoteTimestamp = remoteData.syncTimestamp || 0;
+        
+        console.log('[LOAD] Local timestamp:', new Date(localTimestamp).toLocaleString());
+        console.log('[LOAD] Remote timestamp:', new Date(remoteTimestamp).toLocaleString());
+        
+        if (remoteTimestamp > localTimestamp) {
+          console.log('[LOAD] ✅ Remote is newer, loading');
+          loadDataFromSnapshot(remoteData);
+          return true;
+        } else {
+          console.log('[LOAD] ℹ️ Local is current, keeping local data');
+          return false;
+        }
       }
     } else if (response.status === 404) {
       console.log('[LOAD] Gist not found');
@@ -304,37 +286,119 @@ async function loadFromGist() {
   
   return false;
 }
-// Emergency sync before page close
+
+// NEW: Helper to load data from snapshot
+function loadDataFromSnapshot(data) {
+  Object.keys(data).forEach(key => {
+    if (key !== 'syncTime' && key !== 'syncTimestamp' && key !== 'deviceTime' && key !== 'contentHash') {
+      if (data[key] !== undefined) {
+        localStorage.setItem(key, data[key]);
+      }
+    }
+  });
+  localStorage.setItem('lastSyncTime', data.syncTime);
+  localStorage.setItem('lastSyncTimestamp', data.syncTimestamp.toString());
+  if (data.contentHash) {
+    localStorage.setItem('lastContentHash', data.contentHash);
+  }
+}
+
+// Find existing gist by description
+async function findExistingGist() {
+  if (MANUAL_GIST_ID) {
+    console.log('[SYNC] Using manual GIST_ID:', MANUAL_GIST_ID);
+    return MANUAL_GIST_ID;
+  }
+  if (!GITHUB_TOKEN) return null;
+  
+  try {
+    console.log('[SYNC] 🔍 Searching for existing gist...');
+    const response = await fetch('https://api.github.com/gists', {
+      headers: {
+        'Authorization': `Bearer ${GITHUB_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+    
+    if (response.ok) {
+      const gists = await response.json();
+      const found = gists.find(g => g.description === GIST_DESCRIPTION);
+      
+      if (found) {
+        console.log('[SYNC] ✅ Found existing gist:', found.id);
+        return found.id;
+      }
+    }
+    
+    console.log('[SYNC] No existing gist found');
+    return null;
+  } catch (err) {
+    console.error('[SYNC] Error finding gist:', err);
+    return null;
+  }
+}
+
+// NEW: Immediate sync storage wrapper
+const storage = {
+  save: async (key, data) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+      
+      // Immediate sync with rate limiting
+      if (GITHUB_TOKEN && !syncInProgress) {
+        const now = Date.now();
+        const timeSinceLastSync = now - lastSyncTime;
+        
+        if (timeSinceLastSync >= MIN_SYNC_INTERVAL) {
+          // Sync immediately
+          syncToGist();
+        } else {
+          // Schedule sync after rate limit period
+          const delay = MIN_SYNC_INTERVAL - timeSinceLastSync;
+          console.log('[STORAGE] Rate limited, scheduling sync in', delay, 'ms');
+          setTimeout(() => syncToGist(), delay);
+        }
+      }
+      
+      return true;
+    } catch (e) {
+      console.error('[STORAGE] Save failed:', e);
+      return false;
+    }
+  },
+  load: (key, defaultValue) => {
+    try {
+      const item = localStorage.getItem(key);
+      return item ? JSON.parse(item) : defaultValue;
+    } catch (e) {
+      console.error('[STORAGE] Load failed:', e);
+      return defaultValue;
+    }
+  }
+};
+
 // Emergency sync before page close
 window.addEventListener('beforeunload', (event) => {
   if (GITHUB_TOKEN && !syncInProgress) {
-    if (syncTimeout) {
-      clearTimeout(syncTimeout);
-      syncTimeout = null;
-    }
-    
     const masterTasks = localStorage.getItem('masterTasks');
     const hasData = masterTasks && masterTasks !== 'null' && masterTasks !== '[]';
     
-    if (!hasData) return; // Don't sync empty data
+    if (!hasData) return;
     
     console.log('[APP] Page unloading, emergency sync');
     
     const xhr = new XMLHttpRequest();
     const nowISO = new Date().toISOString();
     const nowTimestamp = Date.now();
+    
+    const dataSnapshot = getCurrentDataSnapshot();
+    const contentHash = hashContent(dataSnapshot);
 
     const data = {
-      masterTasks: localStorage.getItem('masterTasks'),
-      loops: localStorage.getItem('loops'),
-      mode: localStorage.getItem('mode'),
-      forceWeekend: localStorage.getItem('forceWeekend'),
-      timerStartTime: localStorage.getItem('timerStartTime'),
-      activeTaskAssignmentId: localStorage.getItem('activeTaskAssignmentId'),
-      activeLoopKey: localStorage.getItem('activeLoopKey'),
-      lastMidnightCheck: localStorage.getItem('lastMidnightCheck'),
+      ...dataSnapshot,
       syncTime: nowISO,
-      syncTimestamp: nowTimestamp
+      syncTimestamp: nowTimestamp,
+      contentHash: contentHash
     };
 
     const gistData = {
