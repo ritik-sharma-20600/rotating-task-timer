@@ -390,6 +390,87 @@ const storage = {
   }
 };
 
+// NEW: Manual sync function for UI button
+async function manualSync() {
+  if (!GITHUB_TOKEN) {
+    alert('❌ No GitHub token configured');
+    return;
+  }
+  
+  console.log('[MANUAL] Starting manual sync...');
+  
+  // Show syncing indicator
+  const syncBtn = document.getElementById('manual-sync-btn');
+  if (syncBtn) {
+    syncBtn.disabled = true;
+    syncBtn.textContent = '🔄 Syncing...';
+  }
+  
+  try {
+    // First, load any newer data from cloud
+    const loaded = await loadFromGist();
+    if (loaded) {
+      console.log('[MANUAL] Loaded newer data from cloud');
+      // Reload state
+      state.tasks = storage.load('masterTasks', []);
+      state.loops = storage.load('loops', {
+        'out': { note: '', assignments: [], currentIndex: 0 },
+        'in-weekday': { note: '', assignments: [], currentIndex: 0 },
+        'in-weekend': { note: '', assignments: [], currentIndex: 0 }
+      });
+      state.mode = storage.load('mode', 'in');
+      const forceWeekendStr = localStorage.getItem('forceWeekend');
+      state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
+    }
+    
+    // Then, sync local changes to cloud
+    const synced = await syncToGist();
+    
+    if (synced) {
+      alert('✅ Sync complete!');
+      console.log('[MANUAL] Sync successful');
+    } else {
+      alert('ℹ️ Already synced - no changes');
+      console.log('[MANUAL] No changes to sync');
+    }
+    
+    render();
+  } catch (err) {
+    alert('❌ Sync failed: ' + err.message);
+    console.error('[MANUAL] Sync error:', err);
+  } finally {
+    if (syncBtn) {
+      syncBtn.disabled = false;
+      syncBtn.textContent = '🔄 Sync Now';
+    }
+  }
+}
+
+// NEW: Get last sync time for display
+function getLastSyncTimeDisplay() {
+  const lastSyncTime = localStorage.getItem('lastSyncTime');
+  if (!lastSyncTime) return 'Never';
+  
+  const syncDate = new Date(lastSyncTime);
+  const now = new Date();
+  const diffMs = now - syncDate;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
+}
+
+// NEW: Check if there are unsaved changes
+function hasUnsavedChanges() {
+  const currentHash = hashContent(getCurrentDataSnapshot());
+  const lastSyncedHash = localStorage.getItem('lastContentHash');
+  return currentHash !== lastSyncedHash;
+}
+
 // Emergency sync before page close
 window.addEventListener('beforeunload', (event) => {
   if (GITHUB_TOKEN && !syncInProgress) {
@@ -1376,8 +1457,12 @@ function renderManageScreen() {
 // ============================================================================
 // RENDER - SETTINGS SCREEN
 // ============================================================================
+// REPLACE the renderSettingsScreen() function with this updated version:
+
 function renderSettingsScreen() {
   const hasToken = !!GITHUB_TOKEN;
+  const lastSyncDisplay = getLastSyncTimeDisplay();
+  const unsavedChanges = hasUnsavedChanges();
   
   return `<div class="screen">
     <div class="manage-container">
@@ -1395,18 +1480,27 @@ function renderSettingsScreen() {
           <div style="padding: 1rem; background: #16a34a33; border-radius: 0.5rem; margin-bottom: 1rem;">
             <p style="color: #4ade80; font-weight: 600;">✅ Sync Enabled</p>
             <p style="color: #9ca3af; font-size: 0.875rem; margin-top: 0.5rem;">
-              Your data syncs automatically to GitHub Gist.
+              Last synced: ${lastSyncDisplay}
+              ${unsavedChanges ? '<br><span style="color: #fbbf24;">⚠️ You have unsaved changes</span>' : ''}
             </p>
           </div>
           
-<div style="padding: 0.75rem; background: #16a34a33; border-radius: 0.5rem; margin-bottom: 1rem;">
-  <p style="color: #4ade80; font-size: 0.875rem;">
-    🔄 Auto-syncing every 30 seconds<br>
-    ✅ Syncs when you switch tabs<br>
-    ✅ Syncs when you make changes
-  </p>
-</div>
-<button onclick="removeToken()" class="btn-danger" style="width: 100%;">Disconnect & Clear Local Data</button>
+          <div style="padding: 0.75rem; background: #1f2937; border-radius: 0.5rem; margin-bottom: 1rem; border: 1px solid #374151;">
+            <p style="color: #9ca3af; font-size: 0.875rem; margin-bottom: 0.75rem;">
+              📱 <strong>Auto-sync:</strong><br>
+              • When you make changes<br>
+              • When you switch tabs<br>
+              • When you switch devices
+            </p>
+            <button id="manual-sync-btn" onclick="manualSync()" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem;">
+              🔄 Sync Now
+            </button>
+            <p style="color: #6b7280; font-size: 0.75rem; text-align: center; margin-top: 0.5rem;">
+              💡 Tip: Tap this before switching devices to ensure latest data
+            </p>
+          </div>
+          
+          <button onclick="removeToken()" class="btn-danger" style="width: 100%;">Disconnect & Clear Local Data</button>
         ` : `
           <div style="padding: 1rem; background: #dc262633; border-radius: 0.5rem; margin-bottom: 1rem;">
             <p style="color: #fca5a5; font-weight: 600;">⚠️ Sync Disabled</p>
@@ -1435,7 +1529,7 @@ function renderSettingsScreen() {
       <div class="form-card">
         <h3>📱 App Info</h3>
         <p style="color: #9ca3af; font-size: 0.875rem;">
-          <strong>Version:</strong> 2.0<br>
+          <strong>Version:</strong> 2.1<br>
           <strong>Tasks:</strong> ${state.tasks.length}<br>
           <strong>Loops:</strong> 3 (Out, In-Weekday, In-Weekend)
         </p>
@@ -1816,7 +1910,29 @@ if (state.showSettings) {
   <button class="${state.showSettings ? 'active' : ''}" onclick="state.showSettings = !state.showSettings; render()" style="font-size: 1.25rem;">⚙️</button>
 </nav>`;
     
-    app.innerHTML = screenHtml + navHtml + '<div id="tooltip" class="tooltip"></div>';
+    // FIND this section in your render() function (around line 1650):
+// app.innerHTML = screenHtml + navHtml + '<div id="tooltip" class="tooltip"></div>';
+
+// REPLACE WITH:
+
+    const navHtml = `<nav class="bottom-nav">
+  <button class="${!state.showSettings && state.currentScreen === 'tasks' ? 'active' : ''}" onclick="state.showSettings = false; switchScreen('tasks'); event.preventDefault();">Tasks</button>
+  <button class="${!state.showSettings && state.currentScreen === 'focus' ? 'active' : ''}" onclick="state.showSettings = false; switchScreen('focus'); event.preventDefault();">Focus</button>
+  <button class="${!state.showSettings && state.currentScreen === 'manage' ? 'active' : ''}" onclick="state.showSettings = false; switchScreen('manage'); event.preventDefault();">Manage</button>
+  <button class="${state.showSettings ? 'active' : ''}" onclick="state.showSettings = !state.showSettings; render()" style="font-size: 1.25rem;">⚙️</button>
+</nav>`;
+    
+    // Floating sync button (only show if token is configured and not on settings screen)
+    const showFloatingSync = GITHUB_TOKEN && !state.showSettings;
+    const hasChanges = showFloatingSync && hasUnsavedChanges();
+    const floatingSyncHtml = showFloatingSync ? 
+      `<button class="floating-sync ${hasChanges ? 'has-changes' : ''}" 
+               onclick="manualSync()" 
+               title="${hasChanges ? 'Unsaved changes - Tap to sync' : 'Sync now'}">
+        🔄
+      </button>` : '';
+    
+    app.innerHTML = screenHtml + navHtml + floatingSyncHtml + '<div id="tooltip" class="tooltip"></div>';
     
     if (state.currentScreen === 'manage') {
       setupDragAndDrop();
