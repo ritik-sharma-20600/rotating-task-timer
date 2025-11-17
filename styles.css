@@ -540,3 +540,54 @@ body {
     min-width: 200px;
   }
 }
+
+/* ADD THIS TO styles.css - Floating Sync Button (Optional) */
+
+.floating-sync {
+  position: fixed;
+  bottom: 90px; /* Above bottom nav */
+  right: 1rem;
+  background: #4f46e5;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 56px;
+  height: 56px;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 99;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.floating-sync:hover {
+  background: #4338ca;
+  transform: scale(1.1);
+}
+
+.floating-sync.has-changes {
+  animation: pulse 2s infinite;
+  background: #f59e0b;
+}
+
+.floating-sync.syncing {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Hide on settings screen */
+.settings-screen .floating-sync {
+  display: none;
+}
