@@ -1903,13 +1903,6 @@ if (state.showSettings) {
   }
 }
     
-    const navHtml = `<nav class="bottom-nav">
-  <button class="${!state.showSettings && state.currentScreen === 'tasks' ? 'active' : ''}" onclick="state.showSettings = false; switchScreen('tasks'); event.preventDefault();">Tasks</button>
-  <button class="${!state.showSettings && state.currentScreen === 'focus' ? 'active' : ''}" onclick="state.showSettings = false; switchScreen('focus'); event.preventDefault();">Focus</button>
-  <button class="${!state.showSettings && state.currentScreen === 'manage' ? 'active' : ''}" onclick="state.showSettings = false; switchScreen('manage'); event.preventDefault();">Manage</button>
-  <button class="${state.showSettings ? 'active' : ''}" onclick="state.showSettings = !state.showSettings; render()" style="font-size: 1.25rem;">⚙️</button>
-</nav>`;
-    
     // FIND this section in your render() function (around line 1650):
 // app.innerHTML = screenHtml + navHtml + '<div id="tooltip" class="tooltip"></div>';
 
