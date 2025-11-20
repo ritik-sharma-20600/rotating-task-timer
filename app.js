@@ -343,6 +343,17 @@ async function manualSync() {
   }
 }
 
+function hasUnsavedChanges() {
+  const lastSyncTime = localStorage.getItem('lastSyncTime');
+  if (!lastSyncTime) return false;
+  
+  const lastSync = new Date(lastSyncTime);
+  const now = new Date();
+  const diffMinutes = (now - lastSync) / 60000;
+  
+  // If it's been more than 5 minutes, assume possible changes
+  return diffMinutes > 5;
+}
 // Get last sync time for display
 function getLastSyncTimeDisplay() {
   const lastSyncTime = localStorage.getItem('lastSyncTime');
@@ -976,9 +987,7 @@ function moveAssignment(loopKey, fromIndex, toIndex) {
   saveState();
   
   // Force immediate sync after reorder (critical operation)
-  if (GITHUB_TOKEN && !syncInProgress) {
-    syncToGist();
-  }
+
   
   render();
 }
@@ -1375,10 +1384,10 @@ function renderSettingsScreen() {
           
           <div style="padding: 0.75rem; background: #1f2937; border-radius: 0.5rem; margin-bottom: 1rem; border: 1px solid #374151;">
             <p style="color: #9ca3af; font-size: 0.875rem; margin-bottom: 0.75rem;">
-              📱 <strong>Auto-sync:</strong><br>
-              • When you make changes<br>
-              • When you switch tabs<br>
-              • When you switch devices
+📱 <strong>Manual sync mode:</strong><br>
+- Tap "Sync Now" button below<br>
+- Or use floating sync button (🔄)<br>
+- Emergency sync on page close
             </p>
             <button id="manual-sync-btn" onclick="manualSync()" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem;">
               🔄 Sync Now
@@ -1980,26 +1989,7 @@ document.addEventListener('visibilitychange', async () => {
     }
   }
 });
-// Add this AFTER the visibilitychange handler:
-window.addEventListener('focus', async () => {
-  if (GITHUB_TOKEN && !syncInProgress) {
-    console.log('[APP] Window focused → checking cloud...');
-    const loaded = await loadFromGist();
-    if (loaded) {
-      console.log('[APP] ✅ Cloud data loaded');
-      state.tasks = storage.load('masterTasks', []);
-      state.loops = storage.load('loops', {
-        'out': { note: '', assignments: [], currentIndex: 0 },
-        'in-weekday': { note: '', assignments: [], currentIndex: 0 },
-        'in-weekend': { note: '', assignments: [], currentIndex: 0 }
-      });
-      state.mode = storage.load('mode', 'in');
-      const forceWeekendStr = localStorage.getItem('forceWeekend');
-      state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
-      render();
-    }
-  }
-});
+
 
 // ============================================================================
 // INIT
