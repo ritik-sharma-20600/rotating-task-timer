@@ -4,6 +4,7 @@
   box-sizing: border-box;
 }
 
+
 body {
   margin: 0;
   padding: 0;
@@ -14,17 +15,23 @@ body {
   -webkit-tap-highlight-color: transparent;
   overflow: hidden;
   color: #fff;
-  position: fixed; /* ADD THIS */
-  width: 100%; /* ADD THIS */
-  height: 100%; /* ADD THIS */
+  position: fixed;
+  width: 100%;
+  height: 100%;
 }
 
 #app {
   height: 100vh;
-  height: 100dvh; /* ADD THIS - Dynamic viewport for mobile */
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  overflow: hidden; /* ADD THIS */
+  overflow: hidden;
+  /* Prevent viewport resize on keyboard open */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 .screen {
@@ -32,7 +39,11 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   padding-bottom: 80px;
-  -webkit-overflow-scrolling: touch; /* ADD THIS - Smooth iOS scrolling */
+  -webkit-overflow-scrolling: touch;
+  /* CRITICAL: Keep scroll position when keyboard opens */
+  overscroll-behavior: contain;
+  /* Prevent layout shift */
+  position: relative;
 }
 
 .screen::-webkit-scrollbar {
@@ -439,15 +450,66 @@ body {
 }
 
 .btn-icon {
-  background: transparent;
-  color: #9ca3af;
-  padding: 0.5rem;
+  background: #374151;
+  color: white;
+  border: none;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
   font-size: 1.25rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 44px; /* Touch-friendly minimum size */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-icon:hover {
-  color: #fff;
-  background: #374151;
+  background: #4b5563;
+  transform: scale(1.05);
+}
+
+.btn-icon[title*="Save"] {
+  background: #4f46e5;
+}
+
+.btn-icon[title*="Save"]:hover {
+  background: #4338ca;
+}
+
+.btn-icon[title*="Complete"] {
+  background: #16a34a;
+  font-size: 1.5rem;
+}
+
+.btn-icon[title*="Complete"]:hover {
+  background: #15803d;
+}
+
+.btn-icon[title*="Reset"] {
+  background: #ca8a04;
+  font-size: 1.5rem;
+}
+
+.btn-icon[title*="Reset"]:hover {
+  background: #a16207;
+}
+
+.btn-icon[title*="Remove"] {
+  background: #dc2626;
+}
+
+.btn-icon[title*="Remove"]:hover {
+  background: #b91c1c;
+}
+
+.btn-icon[title*="Cancel"] {
+  background: #6b7280;
+  font-size: 1.5rem;
+}
+
+.btn-icon[title*="Cancel"]:hover {
+  background: #4b5563;
 }
 
 .loop-actions {
