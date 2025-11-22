@@ -1773,6 +1773,12 @@ function cancelAddAssignment() {
   if (container) container.innerHTML = '';
 }
 
+// ============================================================================
+// FIX 1: Replace verbose buttons with icons in assignment edit form
+// ============================================================================
+
+// FIND the showEditAssignmentForm() function (around line 1650) and REPLACE the button section:
+
 function showEditAssignmentForm(loopKey, assignmentId) {
   const assignment = getAssignmentById(loopKey, assignmentId);
   const task = getTaskById(assignment.taskId);
@@ -1809,68 +1815,71 @@ function showEditAssignmentForm(loopKey, assignmentId) {
            step="0.5" value="${assignment.duration}" />
     <textarea id="edit-task-note-${assignmentId}" class="textarea-field" rows="5" placeholder="Task notes...">${escapeHtml(task.note)}</textarea>
     <div class="form-actions">
-      <button onclick="submitEditAssignment('${loopKey}', ${assignmentId})" class="btn-primary">Save</button>
+      <button onclick="submitEditAssignment('${loopKey}', ${assignmentId})" class="btn-icon" title="Save">💾</button>
       ${!isComplete ? 
-        `<button onclick="completeAssignment('${loopKey}', ${assignmentId})" class="btn-success">Complete</button>` : ''
+        `<button onclick="completeAssignment('${loopKey}', ${assignmentId})" class="btn-icon" title="Complete">✓</button>` : ''
       }
       ${assignment.completed > 0 ? 
-        `<button onclick="resetAssignment('${loopKey}', ${assignmentId})" class="btn-warning">Reset</button>` : ''
+        `<button onclick="resetAssignment('${loopKey}', ${assignmentId})" class="btn-icon" title="Reset">↺</button>` : ''
       }
-      <button onclick="deleteAssignment('${loopKey}', ${assignmentId})" class="btn-danger">Remove</button>
-      <button onclick="render()" class="btn-secondary">Cancel</button>
+      <button onclick="deleteAssignment('${loopKey}', ${assignmentId})" class="btn-icon" title="Remove">🗑️</button>
+      <button onclick="render()" class="btn-icon" title="Cancel">✕</button>
     </div>
   </div>`;
+  
+  // Add event listeners (keep the same as before)
   setTimeout(() => {
-  const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
-  if (customInput) {
-    let originalValue = customInput.value;
+    const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
+    if (customInput) {
+      let originalValue = customInput.value;
+      
+      customInput.addEventListener('focus', function() {
+        originalValue = this.value;
+        this.select();
+      });
+      
+      customInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          this.value = originalValue;
+          this.blur();
+        }
+      });
+    }
     
-    customInput.addEventListener('focus', function() {
-      originalValue = this.value;
-      this.select(); // Select all on focus
-    });
-    
-    customInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
-        this.value = originalValue;
-        this.blur();
-      }
-    });
-  }
+    const noteArea = document.getElementById(`edit-task-note-${assignmentId}`);
+    if (noteArea) {
+      let originalNote = noteArea.value;
+      
+      noteArea.addEventListener('focus', function() {
+        originalNote = this.value;
+      });
+      
+      noteArea.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          this.value = originalNote;
+          this.blur();
+        }
+      });
+    }
+  }, 50);
   
-  const noteArea = document.getElementById(`edit-task-note-${assignmentId}`);
-  if (noteArea) {
-    let originalNote = noteArea.value;
+  setTimeout(() => {
+    const durationInput = document.getElementById(`edit-duration-${assignmentId}`);
+    if (durationInput) {
+      durationInput.addEventListener('change', function() {
+        const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
+        customInput.style.display = this.value === 'custom' ? 'block' : 'none';
+      });
+    }
     
-    noteArea.addEventListener('focus', function() {
-      originalNote = this.value;
-    });
-    
-    noteArea.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
-        this.value = originalNote;
-        this.blur();
-      }
-    });
-  }
-}, 50);
-  // Focus and select duration input
-setTimeout(() => {
-  const durationInput = document.getElementById(`edit-duration-${assignmentId}`);
-  if (durationInput) {
-    durationInput.addEventListener('change', function() {
-      const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
-      customInput.style.display = this.value === 'custom' ? 'block' : 'none';
-    });
-  }
-  
-  const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
-  if (customInput && customInput.style.display !== 'none') {
-    customInput.focus();
-    customInput.select(); // Select all text
-  }
-}, 50);
+    const customInput = document.getElementById(`edit-custom-duration-${assignmentId}`);
+    if (customInput && customInput.style.display !== 'none') {
+      customInput.focus();
+      customInput.select();
+    }
+  }, 50);
 }
+
 
 function submitEditAssignment(loopKey, assignmentId) {
   const durationSelect = document.getElementById(`edit-duration-${assignmentId}`).value;
