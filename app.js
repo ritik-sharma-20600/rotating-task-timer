@@ -1363,6 +1363,13 @@ function renderFocusScreen() {
 // RENDER - TASKS SCREEN
 // ============================================================================
 function renderTasksScreen() {
+  // Sort tasks alphabetically by name (case-insensitive)
+  const sortedTasks = [...state.tasks].sort((a, b) => {
+    const nameA = (a.name || '').toLowerCase();
+    const nameB = (b.name || '').toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+  
   return `<div class="screen">
     <div class="manage-container">
       <div class="manage-header">
@@ -1373,9 +1380,9 @@ function renderTasksScreen() {
       <div id="create-task-form"></div>
       
       <div class="tasks-list">
-        ${state.tasks.length === 0 ? 
+        ${sortedTasks.length === 0 ? 
           '<div class="empty-state">No tasks yet. Create your first task!</div>' :
-          state.tasks.map(task => renderTaskItem(task)).join('')
+          sortedTasks.map(task => renderTaskItem(task)).join('')
         }
       </div>
     </div>
