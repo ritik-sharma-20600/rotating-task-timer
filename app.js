@@ -277,33 +277,83 @@ async function pullFromGist() {
 }
 
 // MANUAL SYNC: Pull first, then push
-async function manualSync() {
+// ============================================================================
+// REPLACE manualSync() function with these two separate functions:
+// ============================================================================
+
+// SAVE: Push local data to cloud
+async function saveToCloud() {
   if (!GITHUB_TOKEN) {
     alert('❌ No GitHub token configured');
     return;
   }
   
-  console.log('[MANUAL SYNC] ========== START ==========');
+  console.log('[SAVE] ========== SAVE TO CLOUD ==========');
   
-  // Show syncing indicator
-  const syncBtn = document.getElementById('manual-sync-btn');
+  // Show saving indicator
+  const saveBtn = document.getElementById('save-btn');
   const floatingBtn = document.querySelector('.floating-sync');
   
-  if (syncBtn) {
-    syncBtn.disabled = true;
-    syncBtn.textContent = '⏳ Syncing...';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '⏳ Saving...';
   }
   if (floatingBtn) {
     floatingBtn.classList.add('syncing');
+    floatingBtn.textContent = '💾';
   }
   
   try {
-    // STEP 1: Pull from cloud (this ensures we have latest data)
-    console.log('[MANUAL SYNC] Step 1: Pulling from cloud...');
-    const pulled = await pullFromGist();
+    const saved = await pushToGist();
     
-    if (pulled) {
-      console.log('[MANUAL SYNC] ✅ Loaded cloud data');
+    if (saved) {
+      alert('✅ Saved to cloud!');
+      console.log('[SAVE] ✅ Data saved to cloud');
+    } else {
+      alert('⚠️ Nothing to save or save failed');
+      console.log('[SAVE] Nothing saved');
+    }
+    
+    render();
+    
+  } catch (err) {
+    alert('❌ Save failed: ' + err.message);
+    console.error('[SAVE] Error:', err);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 Save to Cloud';
+    }
+    if (floatingBtn) {
+      floatingBtn.classList.remove('syncing');
+      floatingBtn.textContent = '🔄';
+    }
+    console.log('[SAVE] ========== SAVE END ==========\n');
+  }
+}
+
+// LOAD: Pull data from cloud
+async function loadFromCloud() {
+  if (!GITHUB_TOKEN) {
+    alert('❌ No GitHub token configured');
+    return;
+  }
+  
+  console.log('[LOAD] ========== LOAD FROM CLOUD ==========');
+  
+  // Show loading indicator
+  const loadBtn = document.getElementById('load-btn');
+  
+  if (loadBtn) {
+    loadBtn.disabled = true;
+    loadBtn.textContent = '⏳ Loading...';
+  }
+  
+  try {
+    const loaded = await pullFromGist();
+    
+    if (loaded) {
+      console.log('[LOAD] ✅ Loaded cloud data, reloading state...');
       
       // Reload state from localStorage
       state.tasks = storage.load('masterTasks', []);
@@ -315,31 +365,23 @@ async function manualSync() {
       state.mode = storage.load('mode', 'in');
       const forceWeekendStr = localStorage.getItem('forceWeekend');
       state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
+      
+      alert('✅ Loaded from cloud!');
+      render();
+    } else {
+      alert('⚠️ No data found in cloud or already up to date');
+      console.log('[LOAD] No data loaded');
     }
-    
-    // STEP 2: Push to cloud (this ensures cloud has our latest data)
-    console.log('[MANUAL SYNC] Step 2: Pushing to cloud...');
-    const pushed = await pushToGist();
-    
-    if (pushed) {
-      console.log('[MANUAL SYNC] ✅ Pushed to cloud');
-    }
-    
-    alert('✅ Sync complete!');
-    render();
     
   } catch (err) {
-    alert('❌ Sync failed: ' + err.message);
-    console.error('[MANUAL SYNC] Error:', err);
+    alert('❌ Load failed: ' + err.message);
+    console.error('[LOAD] Error:', err);
   } finally {
-    if (syncBtn) {
-      syncBtn.disabled = false;
-      syncBtn.textContent = '🔄 Sync Now';
+    if (loadBtn) {
+      loadBtn.disabled = false;
+      loadBtn.textContent = '📥 Load from Cloud';
     }
-    if (floatingBtn) {
-      floatingBtn.classList.remove('syncing');
-    }
-    console.log('[MANUAL SYNC] ========== END ==========\n');
+    console.log('[LOAD] ========== LOAD END ==========\n');
   }
 }
 
@@ -1351,15 +1393,14 @@ function renderManageScreen() {
   </div>`;
 }
 
+
 // ============================================================================
-// RENDER - SETTINGS SCREEN
+// UPDATE renderSettingsScreen() - Replace the sync section
 // ============================================================================
-// REPLACE the renderSettingsScreen() function with this updated version:
 
 function renderSettingsScreen() {
   const hasToken = !!GITHUB_TOKEN;
   const lastSyncDisplay = getLastSyncTimeDisplay();
-  const unsavedChanges = hasUnsavedChanges();
   
   return `<div class="screen">
     <div class="manage-container">
@@ -1378,22 +1419,27 @@ function renderSettingsScreen() {
             <p style="color: #4ade80; font-weight: 600;">✅ Sync Enabled</p>
             <p style="color: #9ca3af; font-size: 0.875rem; margin-top: 0.5rem;">
               Last synced: ${lastSyncDisplay}
-              ${unsavedChanges ? '<br><span style="color: #fbbf24;">⚠️ You have unsaved changes</span>' : ''}
             </p>
           </div>
           
           <div style="padding: 0.75rem; background: #1f2937; border-radius: 0.5rem; margin-bottom: 1rem; border: 1px solid #374151;">
             <p style="color: #9ca3af; font-size: 0.875rem; margin-bottom: 0.75rem;">
-📱 <strong>Manual sync mode:</strong><br>
-- Tap "Sync Now" button below<br>
-- Or use floating sync button (🔄)<br>
-- Emergency sync on page close
+              💾 <strong>Save to Cloud:</strong> Uploads your current data<br>
+              📥 <strong>Load from Cloud:</strong> Downloads latest data<br>
+              🔄 <strong>Floating button:</strong> Quick save
             </p>
-            <button id="manual-sync-btn" onclick="manualSync()" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem;">
-              🔄 Sync Now
-            </button>
+            
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+              <button id="save-btn" onclick="saveToCloud()" class="btn-primary" style="flex: 1;">
+                💾 Save to Cloud
+              </button>
+              <button id="load-btn" onclick="loadFromCloud()" class="btn-secondary" style="flex: 1;">
+                📥 Load from Cloud
+              </button>
+            </div>
+            
             <p style="color: #6b7280; font-size: 0.75rem; text-align: center; margin-top: 0.5rem;">
-              💡 Tip: Tap this before switching devices to ensure latest data
+              💡 Workflow: Make changes → Save → Switch devices → Load
             </p>
           </div>
           
@@ -1426,7 +1472,7 @@ function renderSettingsScreen() {
       <div class="form-card">
         <h3>📱 App Info</h3>
         <p style="color: #9ca3af; font-size: 0.875rem;">
-          <strong>Version:</strong> 2.1<br>
+          <strong>Version:</strong> 2.2<br>
           <strong>Tasks:</strong> ${state.tasks.length}<br>
           <strong>Loops:</strong> 3 (Out, In-Weekday, In-Weekend)
         </p>
@@ -1793,10 +1839,10 @@ if (state.showSettings) {
     const showFloatingSync = GITHUB_TOKEN && !state.showSettings;
     const hasChanges = showFloatingSync && hasUnsavedChanges();
     const floatingSyncHtml = showFloatingSync ? 
-      `<button class="floating-sync ${hasChanges ? 'has-changes' : ''}" 
-               onclick="manualSync()" 
-               title="${hasChanges ? 'Unsaved changes - Tap to sync' : 'Sync now'}">
-        🔄
+      `<button class="floating-sync" 
+               onclick="saveToCloud()" 
+               title="Save to cloud">
+        💾
       </button>` : '';
     
     app.innerHTML = screenHtml + navHtml + floatingSyncHtml + '<div id="tooltip" class="tooltip"></div>';
@@ -1994,6 +2040,12 @@ document.addEventListener('visibilitychange', async () => {
 // ============================================================================
 // INIT
 // ============================================================================
+// ============================================================================
+// UPDATE init() function - Auto-load on app launch
+// ============================================================================
+
+// FIND the init() function (around line 2020) and REPLACE with:
+
 (async function init() {
   try {
     // Wake lock
@@ -2018,8 +2070,30 @@ document.addEventListener('visibilitychange', async () => {
     
     await registerSW();
     
-    // NO AUTO-SYNC ON LOAD
-    console.log('[APP] Using local data');
+    // AUTO-LOAD FROM CLOUD ON LAUNCH
+    if (GITHUB_TOKEN) {
+      console.log('[APP] Loading from cloud...');
+      const loaded = await pullFromGist();
+      
+      if (loaded) {
+        console.log('[APP] ✅ Loaded cloud data');
+        
+        // Reload state from localStorage
+        state.tasks = storage.load('masterTasks', []);
+        state.loops = storage.load('loops', {
+          'out': { note: '', assignments: [], currentIndex: 0 },
+          'in-weekday': { note: '', assignments: [], currentIndex: 0 },
+          'in-weekend': { note: '', assignments: [], currentIndex: 0 }
+        });
+        state.mode = storage.load('mode', 'in');
+        const forceWeekendStr = localStorage.getItem('forceWeekend');
+        state.forceWeekend = forceWeekendStr === 'true' ? true : forceWeekendStr === 'false' ? false : null;
+      } else {
+        console.log('[APP] Using local data (no cloud data or already current)');
+      }
+    } else {
+      console.log('[APP] Using local data (no token)');
+    }
     
     checkTimerOnLoad();
     
@@ -2029,8 +2103,6 @@ document.addEventListener('visibilitychange', async () => {
     }
     
     render();
-    
-    // NO PERIODIC SYNC - removed setInterval
     
   } catch (e) {
     console.error('[APP] Init error:', e);
